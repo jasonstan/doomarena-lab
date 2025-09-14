@@ -24,3 +24,6 @@ run: install
 
 scaffold:
 	mkdir -p adapters attacks defenses filters configs/airline_escalating_v1 results analysis
+.PHONY: journal
+journal: install
+	$(PY) scripts/new_journal_entry.py
