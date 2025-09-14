@@ -1,19 +1,26 @@
-.ONESHELL:
-PY=python
-TEST?=-q
-CONFIG?=configs/airline_escalating_v1/run.yaml
+.PHONY: venv install test run scaffold
+
+VENV := .venv
+PY   := $(VENV)/bin/python
+PIP  := $(VENV)/bin/pip
+CONFIG ?= configs/airline_escalating_v1/run.yaml
 
 venv:
-	$(PY) -m venv .venv && . .venv/bin/activate && pip install -U pip
+	python -m venv $(VENV)
+	$(PY) -m pip install -U pip
 
-install:
-	. .venv/bin/activate && pip install -U doomarena doomarena-taubench pytest pyyaml
+install: venv
+	$(PIP) install -U doomarena doomarena-taubench pytest pyyaml
 
-test:
-	. .venv/bin/activate && pytest $(TEST)
+test: install
+	$(PY) -m pytest -q
 
-run:
-	. .venv/bin/activate && $(PY) scripts/taubench_airline_da.py --config $(CONFIG)
+run: install
+	@if [ ! -f scripts/taubench_airline_da.py ]; then \
+	  echo "scripts/taubench_airline_da.py not found in this PR. Merge the engine-v2 PR (adds the runner) or create the script."; \
+	  exit 1; \
+	fi
+	$(PY) scripts/taubench_airline_da.py --config $(CONFIG)
 
 scaffold:
 	mkdir -p adapters attacks defenses filters configs/airline_escalating_v1 results analysis
