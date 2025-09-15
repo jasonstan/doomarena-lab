@@ -33,6 +33,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run a single experiment seed")
     parser.add_argument("--config", required=True, help="Path to experiment YAML config")
     parser.add_argument("--seed", type=int, help="Seed override", default=None)
+    parser.add_argument("--mode", help="Execution mode override", default=None)
+    parser.add_argument("--trials", type=int, help="Trials override", default=None)
     return parser.parse_args()
 
 
@@ -149,6 +151,11 @@ def run_shim(
 def main() -> None:
     args = parse_args()
     cfg = load_config(args.config)
+
+    if args.mode is not None:
+        cfg["mode"] = args.mode
+    if args.trials is not None:
+        cfg["trials"] = int(args.trials)
 
     exp = cfg.get("exp")
     if not exp:

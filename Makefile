@@ -36,24 +36,8 @@ sweep:
 
 .ONESHELL: xsweep
 xsweep:
-.ONESHELL: xsweep
-xsweep:
-	. $(VENV)/bin/activate && python - <<'PY'
-import subprocess, sys, yaml
-with open("$(CONFIG)", "r", encoding="utf-8") as fh:
-    cfg = yaml.safe_load(fh) or {}
-seeds = cfg.get("seeds", [])
-rc = 0
-for s in seeds:
-    rc |= subprocess.call([
-        "bash","-lc",
-        ". .venv/bin/activate && python scripts/run_experiment.py --config $(CONFIG) --seed %d" % s,
-    ])
-sys.exit(rc)
-PY
+	. $(VENV)/bin/activate && python scripts/xsweep.py --config $(CONFIG) --mode $(MODE) --trials $(TRIALS)
 
-	sys.exit(rc)
-	PY
 
 sweep3:
 	$(MAKE) sweep SEEDS="41,42,43" TRIALS=5 MODE=SHIM
