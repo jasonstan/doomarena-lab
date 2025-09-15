@@ -1,4 +1,4 @@
-.PHONY: venv install test run scaffold
+.PHONY: venv install test run aggregate report scaffold
 
 VENV := .venv
 PY   := $(VENV)/bin/python
@@ -10,7 +10,7 @@ venv:
 	$(PY) -m pip install -U pip
 
 install: venv
-	$(PIP) install -U doomarena doomarena-taubench pytest pyyaml
+	$(PIP) install -U doomarena doomarena-taubench pytest pyyaml pandas
 	$(PY) scripts/ensure_tau_bench.py || (echo "tau_bench unavailable; continuing without real τ-Bench" && exit 0)
 
 test: install
@@ -23,8 +23,15 @@ run: install
 	fi
 	$(PY) scripts/taubench_airline_da.py --config $(CONFIG)
 
+aggregate:
+	$(PY) scripts/aggregate_results.py
+
+report: aggregate
+	$(PY) scripts/update_readme_results.py
+
 scaffold:
 	mkdir -p adapters attacks defenses filters configs/airline_escalating_v1 results analysis
+
 .PHONY: journal
 journal: install
 	$(PY) scripts/new_journal_entry.py
