@@ -19,6 +19,14 @@ head -5 results/summary.csv
 
 > MODE=REAL attempts τ-Bench (requires access).
 
+### Quick plots
+
+```bash
+make sweep SEEDS="41,42,43" TRIALS=5 MODE=SHIM
+open results/plots/asr_by_seed.png
+open results/plots/asr_over_time.png
+```
+
 ### Swapping to real DoomArena classes
 
 This repo currently uses thin adapters to mirror DoomArena concepts:
