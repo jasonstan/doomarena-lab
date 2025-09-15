@@ -31,6 +31,21 @@ sweep:
 	. .venv/bin/activate && python scripts/run_batch.py --exp $(EXP) --seeds "$(SEEDS)" --trials $(TRIALS) --mode $(MODE)
 	$(MAKE) report
 
+.ONESHELL: xsweep
+xsweep:
+	. .venv/bin/activate && python - <<-'PY'
+	import subprocess, sys, yaml
+	cfg = yaml.safe_load(open("$(CONFIG)", "r"), encoding="utf-8") or {}
+	seeds = cfg.get("seeds", [])
+	rc = 0
+	for s in seeds:
+	    rc |= subprocess.call([
+	        "bash", "-lc",
+	        ". .venv/bin/activate && python scripts/run_experiment.py --config $(CONFIG) --seed %d" % s,
+	    ])
+	sys.exit(rc)
+	PY
+
 sweep3:
 	$(MAKE) sweep SEEDS="41,42,43" TRIALS=5 MODE=SHIM
 
@@ -47,6 +62,8 @@ plot:
 	else \
 		python scripts/plot_results.py --exp $(EXP); \
 	fi
+
+# plot stays as-is above…
 
 report: aggregate plot
 	if [ -x "$(PY)" ]; then \
