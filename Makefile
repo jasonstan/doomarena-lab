@@ -1,4 +1,4 @@
-.PHONY: venv install test run sweep aggregate report scaffold check-schema plot sweep3 real1
+.PHONY: venv install test run sweep aggregate report scaffold check-schema plot sweep3 real1 xrun xsweep
 
 VENV := .venv
 PY   := $(VENV)/bin/python
@@ -27,18 +27,36 @@ check-schema: venv
 run:
 	. .venv/bin/activate && python scripts/run_batch.py --exp $(EXP) --seeds "$(SEED)" --trials $(TRIALS) --mode $(MODE)
 
+xrun:
+	. .venv/bin/activate && python scripts/run_experiment.py --config $(CONFIG) --seed $(SEED)
+
 sweep:
-        . .venv/bin/activate && python scripts/run_batch.py --exp $(EXP) --seeds "$(SEEDS)" --trials $(TRIALS) --mode $(MODE)
-        $(MAKE) report
+	. .venv/bin/activate && python scripts/run_batch.py --exp $(EXP) --seeds "$(SEEDS)" --trials $(TRIALS) --mode $(MODE)
+	$(MAKE) report
+
+.ONESHELL: xsweep
+xsweep:
+	. .venv/bin/activate && python - <<'PY'
+	import subprocess, sys, yaml
+	cfg = yaml.safe_load(open("$(CONFIG)", "r", encoding="utf-8")) or {}
+	seeds = cfg.get("seeds", [])
+	rc = 0
+	for s in seeds: rc |= subprocess.call([
+	    "bash",
+	    "-lc",
+	    ". .venv/bin/activate && python scripts/run_experiment.py --config $(CONFIG) --seed %d" % s,
+	])
+	sys.exit(rc)
+	PY
 
 sweep3:
-        $(MAKE) sweep SEEDS="41,42,43" TRIALS=5 MODE=SHIM
+	$(MAKE) sweep SEEDS="41,42,43" TRIALS=5 MODE=SHIM
 
 aggregate:
-        if [ -x "$(PY)" ]; then \
-                "$(PY)" scripts/aggregate_results.py; \
-        else \
-                python scripts/aggregate_results.py; \
+	if [ -x "$(PY)" ]; then \
+	"$(PY)" scripts/aggregate_results.py; \
+	else \
+	python scripts/aggregate_results.py; \
 	fi
 
 plot:
@@ -48,18 +66,22 @@ plot:
 		python scripts/plot_results.py --exp $(EXP); \
 	fi
 
+ifeq ($(origin CONFIG), command line)
+report: xsweep
+endif
+
 report: aggregate plot
-        if [ -x "$(PY)" ]; then \
-                "$(PY)" scripts/update_readme_results.py; \
-        else \
-                python scripts/update_readme_results.py; \
-        fi
+	if [ -x "$(PY)" ]; then \
+	"$(PY)" scripts/update_readme_results.py; \
+	else \
+	python scripts/update_readme_results.py; \
+	fi
 
 real1:
-        $(MAKE) run SEED=42 TRIALS=5 MODE=REAL
+	$(MAKE) run SEED=42 TRIALS=5 MODE=REAL
 
 scaffold:
-        mkdir -p adapters attacks defenses filters configs/airline_escalating_v1 results analysis
+	mkdir -p adapters attacks defenses filters configs/airline_escalating_v1 results analysis
 
 .PHONY: journal
 journal: install
