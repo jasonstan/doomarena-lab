@@ -36,16 +36,22 @@ sweep:
 
 .ONESHELL: xsweep
 xsweep:
-	. .venv/bin/activate && python - <<'PY'
-	import subprocess, sys, yaml
-	cfg = yaml.safe_load(open("$(CONFIG)", "r", encoding="utf-8")) or {}
-	seeds = cfg.get("seeds", [])
-	rc = 0
-	for s in seeds: rc |= subprocess.call([
-	    "bash",
-	    "-lc",
-	    ". .venv/bin/activate && python scripts/run_experiment.py --config $(CONFIG) --seed %d" % s,
-	])
+.ONESHELL: xsweep
+xsweep:
+	. $(VENV)/bin/activate && python - <<'PY'
+import subprocess, sys, yaml
+with open("$(CONFIG)", "r", encoding="utf-8") as fh:
+    cfg = yaml.safe_load(fh) or {}
+seeds = cfg.get("seeds", [])
+rc = 0
+for s in seeds:
+    rc |= subprocess.call([
+        "bash","-lc",
+        ". .venv/bin/activate && python scripts/run_experiment.py --config $(CONFIG) --seed %d" % s,
+    ])
+sys.exit(rc)
+PY
+
 	sys.exit(rc)
 	PY
 
@@ -54,9 +60,13 @@ sweep3:
 
 aggregate:
 	if [ -x "$(PY)" ]; then \
-	"$(PY)" scripts/aggregate_results.py; \
+aggregate:
+	if [ -x "$(PY)" ]; then \
+		"$(PY)" scripts/aggregate_results.py; \
 	else \
-	python scripts/aggregate_results.py; \
+		python scripts/aggregate_results.py; \
+	fi
+
 	fi
 
 plot:
@@ -66,15 +76,12 @@ plot:
 		python scripts/plot_results.py --exp $(EXP); \
 	fi
 
-ifeq ($(origin CONFIG), command line)
-report: xsweep
-endif
-
 report: aggregate plot
 	if [ -x "$(PY)" ]; then \
-	"$(PY)" scripts/update_readme_results.py; \
+		"$(PY)" scripts/update_readme_results.py; \
 	else \
-	python scripts/update_readme_results.py; \
+		python scripts/update_readme_results.py; \
+
 	fi
 
 real1:
