@@ -11,6 +11,7 @@ venv:
 
 install: venv
 	$(PIP) install -U doomarena doomarena-taubench pytest pyyaml
+	$(PY) scripts/ensure_tau_bench.py || (echo "tau_bench unavailable; continuing without real τ-Bench" && exit 0)
 
 test: install
 	$(PY) -m pytest -q
@@ -27,3 +28,7 @@ scaffold:
 .PHONY: journal
 journal: install
 	$(PY) scripts/new_journal_entry.py
+
+.PHONY: install-tau
+install-tau: install
+	$(PY) scripts/ensure_tau_bench.py || (echo "tau_bench unavailable; continuing without real τ-Bench" && exit 0)
