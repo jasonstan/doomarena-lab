@@ -1,4 +1,4 @@
-.PHONY: venv install test run sweep aggregate report scaffold
+.PHONY: venv install test run sweep aggregate report scaffold check-schema
 
 VENV := .venv
 PY   := $(VENV)/bin/python
@@ -20,6 +20,9 @@ install: venv
 
 test: install
 	$(PY) -m pytest -q
+
+check-schema: venv
+	$(PY) scripts/check_schema.py
 
 run:
 	. .venv/bin/activate && python scripts/run_batch.py --exp $(EXP) --seeds "$(SEED)" --trials $(TRIALS) --mode $(MODE)

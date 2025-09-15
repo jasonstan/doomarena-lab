@@ -7,6 +7,7 @@ This repository is a scaffold for the TAUBench Airline example in DoomArena.
 - Edit config at `configs/airline_escalating_v1/run.yaml`.
 - Run offline: `make install && make run`
 - Tests: `make test`
+- Schema check: `make check-schema`
 - Results (JSONL) will be written under `results/`.
 
 ### Quickstart (experiments)
@@ -34,8 +35,16 @@ This repo currently uses thin adapters to mirror DoomArena concepts:
 
 | exp | seed | mode | ASR | trials | successes | path |
 | --- | --- | --- | --- | --- | --- | --- |
-| airline_escalating_v1 | 43 | SHIM | 0.60 (3/5) | 5 | 3 | [airline_escalating_v1_seed43](results/airline_escalating_v1/airline_escalating_v1_seed43.jsonl) |
 | airline_escalating_v1 | 42 | SHIM | 0.60 (3/5) | 5 | 3 | [airline_escalating_v1_seed42](results/airline_escalating_v1/airline_escalating_v1_seed42.jsonl) |
-| airline_escalating_v1 | 41 | SHIM | 0.60 (3/5) | 5 | 3 | [airline_escalating_v1_seed41](results/airline_escalating_v1/airline_escalating_v1_seed41.jsonl) |
 
 <!-- RESULTS:END -->
+
+### Results schema
+
+`results/summary.csv` is locked to the following header (order matters):
+
+```
+timestamp,run_id,git_sha,repo_dirty,exp,seed,mode,trials,successes,asr,py_version,path
+```
+
+Use `make check-schema` to verify the file matches the expected schema.

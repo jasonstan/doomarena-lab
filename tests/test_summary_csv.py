@@ -3,7 +3,9 @@ from pathlib import Path
 
 EXPECTED_COLUMNS = [
     "timestamp",
+    "run_id",
     "git_sha",
+    "repo_dirty",
     "exp",
     "seed",
     "mode",
@@ -22,13 +24,16 @@ def test_summary_csv_present_and_valid():
     with summary_path.open("r", encoding="utf-8", newline="") as handle:
         reader = csv.DictReader(handle)
         assert reader.fieldnames is not None, "summary.csv missing header"
-        for column in EXPECTED_COLUMNS:
-            assert column in reader.fieldnames, f"Missing column: {column}"
+        assert (
+            reader.fieldnames == EXPECTED_COLUMNS
+        ), f"Unexpected header order: {reader.fieldnames}"
 
         for row in reader:
             assert row.get("trials"), "trials value missing"
             assert row.get("successes"), "successes value missing"
             assert row.get("asr"), "asr value missing"
+            assert row.get("run_id"), "run_id value missing"
+            assert row.get("repo_dirty") in {"true", "false"}, "repo_dirty must be true/false"
 
             trials = int(row["trials"])
             successes = int(row["successes"])

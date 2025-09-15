@@ -10,7 +10,9 @@ from typing import Dict, List, Optional, Tuple
 
 SUMMARY_COLUMNS = [
     "timestamp",
+    "run_id",
     "git_sha",
+    "repo_dirty",
     "exp",
     "seed",
     "mode",
@@ -50,14 +52,23 @@ def parse_jsonl(path: Path) -> Tuple[int, int, float, Optional[str]]:
     if summary is None:
         raise RuntimeError(f"Missing summary in {path}")
     trials = int(summary.get("trials", 0))
+    if trials < 0:
+        trials = 0
     successes = int(summary.get("successes", 0))
+    if successes < 0:
+        successes = 0
     if successes > trials:
         successes = trials
     asr = summary.get("asr")
     if asr is None:
         asr = successes / trials if trials else 0.0
+    asr_value = float(asr)
+    if asr_value < 0.0:
+        asr_value = 0.0
+    elif asr_value > 1.0:
+        asr_value = 1.0
     mode = summary.get("mode")
-    return trials, successes, float(asr), mode
+    return trials, successes, asr_value, mode
 
 
 def get_current_commit() -> str:
@@ -72,6 +83,26 @@ def extract_seed(path: Path) -> str:
     if match:
         return match.group("seed")
     return ""
+
+
+def generate_run_id() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
+
+
+def _git_diff_is_clean(args: Optional[List[str]] = None) -> bool:
+    cmd = ["git", "diff", "--quiet"]
+    if args:
+        cmd.extend(args)
+    result = subprocess.run(cmd, check=False)
+    return result.returncode == 0
+
+
+def repo_is_dirty() -> bool:
+    if not _git_diff_is_clean():
+        return True
+    if not _git_diff_is_clean(["--cached"]):
+        return True
+    return False
 
 
 def normalize_mode(mode: Optional[str]) -> str:
@@ -91,7 +122,7 @@ def read_existing(summary_path: Path) -> Dict[Tuple[str, str], Dict[str, str]]:
         reader = csv.DictReader(handle)
         if reader.fieldnames is None:
             return rows
-        if not set(SUMMARY_COLUMNS).issubset(set(reader.fieldnames)):
+        if reader.fieldnames != SUMMARY_COLUMNS:
             return rows
         for row in reader:
             exp = row.get("exp", "")
@@ -105,6 +136,8 @@ def build_rows(base_dir: Path, existing: Dict[Tuple[str, str], Dict[str, str]]) 
     commit = get_current_commit()
     py_version = platform.python_version()
     now_iso = datetime.now(timezone.utc).isoformat()
+    run_id = generate_run_id()
+    repo_dirty = repo_is_dirty()
     rows: Dict[Tuple[str, str], Dict[str, str]] = dict(existing)
     seen_keys: set[Tuple[str, str]] = set()
 
@@ -113,13 +146,16 @@ def build_rows(base_dir: Path, existing: Dict[Tuple[str, str], Dict[str, str]]) 
         seed = extract_seed(path)
         key = (exp, seed)
         trials, successes, asr, mode_hint = parse_jsonl(path)
+        asr = max(0.0, min(1.0, asr))
         row = dict(rows.get(key, {}))
         timestamp = row.get("timestamp") or now_iso
         mode = normalize_mode(mode_hint or row.get("mode"))
         row.update(
             {
                 "timestamp": timestamp,
+                "run_id": row.get("run_id") or run_id,
                 "git_sha": commit,
+                "repo_dirty": row.get("repo_dirty") or ("true" if repo_dirty else "false"),
                 "exp": exp,
                 "seed": seed,
                 "mode": mode,

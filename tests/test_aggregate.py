@@ -7,7 +7,9 @@ import pandas as pd
 
 EXPECTED_COLUMNS = [
     "timestamp",
+    "run_id",
     "git_sha",
+    "repo_dirty",
     "exp",
     "seed",
     "mode",
@@ -38,17 +40,20 @@ def test_aggregate_generates_summary():
     assert csv_path.exists()
     df = pd.read_csv(csv_path)
     assert len(df) >= 1
-    for column in EXPECTED_COLUMNS:
-        assert column in df.columns
+    assert list(df.columns) == EXPECTED_COLUMNS
 
     asr_values = pd.to_numeric(df["asr"], errors="coerce")
     trials = pd.to_numeric(df["trials"], errors="coerce")
     successes = pd.to_numeric(df["successes"], errors="coerce")
+    repo_dirty = df["repo_dirty"].astype(str).str.lower()
+    run_ids = df["run_id"].astype(str)
 
     assert asr_values.between(0.0, 1.0).all()
     assert (trials >= successes).all()
     assert (trials >= 0).all()
     assert (successes >= 0).all()
+    assert repo_dirty.isin(["true", "false"]).all()
+    assert run_ids.str.len().gt(0).all()
 
     readme = Path("README.md").read_text(encoding="utf-8")
     assert "<!-- RESULTS:BEGIN -->" in readme
