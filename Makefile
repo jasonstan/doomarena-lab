@@ -35,7 +35,8 @@ sweep:
 xsweep:
 	. .venv/bin/activate && python - <<-'PY'
 	import subprocess, sys, yaml
-	cfg = yaml.safe_load(open("$(CONFIG)", "r"), encoding="utf-8") or {}
+        with open("$(CONFIG)", "r", encoding="utf-8") as cfg_file:
+            cfg = yaml.safe_load(cfg_file) or {}
 	seeds = cfg.get("seeds", [])
 	rc = 0
 	for s in seeds:
