@@ -13,18 +13,13 @@ This repository is a scaffold for the TAUBench Airline example in DoomArena.
 ### Quickstart (experiments)
 
 ```bash
-make sweep SEEDS="41,42,43" TRIALS=5 MODE=SHIM
+# 3 seeds, 5 trials each (shim)
+make sweep3
 head -5 results/summary.csv
-```
-
-> MODE=REAL attempts τ-Bench (requires access).
-
-### Quick plots
-
-```bash
-make sweep SEEDS="41,42,43" TRIALS=5 MODE=SHIM
-open results/plots/asr_by_seed.png
-open results/plots/asr_over_time.png
+# plots
+make plot
+# try REAL (requires permissions), otherwise falls back:
+make real1
 ```
 
 ### Swapping to real DoomArena classes
