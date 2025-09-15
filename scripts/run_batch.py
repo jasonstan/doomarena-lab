@@ -5,7 +5,7 @@ import platform
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 from taubench_airline_da import load_config, run as shim_run
 
@@ -17,7 +17,9 @@ except Exception:  # pragma: no cover - optional dependency
 
 SUMMARY_COLUMNS = [
     "timestamp",
+    "run_id",
     "git_sha",
+    "repo_dirty",
     "exp",
     "seed",
     "mode",
@@ -73,6 +75,26 @@ def git_sha() -> str:
     )
 
 
+def generate_run_id() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
+
+
+def _git_diff_is_clean(args: Optional[List[str]] = None) -> bool:
+    cmd = ["git", "diff", "--quiet"]
+    if args:
+        cmd.extend(args)
+    result = subprocess.run(cmd, check=False)
+    return result.returncode == 0
+
+
+def repo_is_dirty() -> bool:
+    if not _git_diff_is_clean():
+        return True
+    if not _git_diff_is_clean(["--cached"]):
+        return True
+    return False
+
+
 def ensure_output_config(cfg: Dict, output_path: Path) -> Dict:
     output_cfg = dict(cfg.get("output", {}) or {})
     output_cfg["dir"] = output_path.parent.as_posix()
@@ -104,7 +126,12 @@ def parse_metrics(summary: Dict) -> Tuple[int, int, float]:
     asr = summary.get("asr")
     if asr is None:
         asr = successes / trials if trials else 0.0
-    return trials, successes, float(asr)
+    asr_value = float(asr)
+    if asr_value < 0.0:
+        asr_value = 0.0
+    elif asr_value > 1.0:
+        asr_value = 1.0
+    return trials, successes, asr_value
 
 
 def read_existing_summary(summary_path: Path) -> List[Dict[str, str]]:
@@ -114,7 +141,7 @@ def read_existing_summary(summary_path: Path) -> List[Dict[str, str]]:
         reader = csv.DictReader(handle)
         if reader.fieldnames is None:
             return []
-        if not set(SUMMARY_COLUMNS).issubset(set(reader.fieldnames)):
+        if reader.fieldnames != SUMMARY_COLUMNS:
             # Legacy schema; start fresh
             return []
         return [dict(row) for row in reader]
@@ -162,6 +189,8 @@ def run_single(
     outdir: Path,
     rows: List[Dict[str, str]],
     commit: str,
+    run_id: str,
+    repo_dirty: bool,
 ) -> None:
     config_path = Path("configs") / exp / "run.yaml"
     if not config_path.exists():
@@ -200,7 +229,9 @@ def run_single(
 
     row = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
+        "run_id": run_id,
         "git_sha": commit,
+        "repo_dirty": "true" if repo_dirty else "false",
         "exp": exp,
         "seed": str(seed),
         "mode": actual_mode,
@@ -229,6 +260,8 @@ def main() -> None:
     summary_path = Path("results") / "summary.csv"
     existing_rows = read_existing_summary(summary_path)
     commit = git_sha()
+    run_id = generate_run_id()
+    repo_dirty = repo_is_dirty()
 
     for seed in seeds:
         run_single(
@@ -239,6 +272,8 @@ def main() -> None:
             outdir=outdir,
             rows=existing_rows,
             commit=commit,
+            run_id=run_id,
+            repo_dirty=repo_dirty,
         )
 
     write_summary(summary_path, existing_rows)
