@@ -10,6 +10,16 @@ TRIALS ?= 5
 EXP ?= airline_escalating_v1
 MODE ?= SHIM
 
+MODE_ARG :=
+ifneq ($(origin MODE), file)
+MODE_ARG := --mode $(MODE)
+endif
+
+TRIALS_ARG :=
+ifneq ($(origin TRIALS), file)
+TRIALS_ARG := --trials $(TRIALS)
+endif
+
 venv:
 	python -m venv $(VENV)
 	$(PY) -m pip install -U pip
@@ -34,39 +44,22 @@ sweep:
 	. .venv/bin/activate && python scripts/run_batch.py --exp $(EXP) --seeds "$(SEEDS)" --trials $(TRIALS) --mode $(MODE)
 	$(MAKE) report
 
-.ONESHELL: xsweep
-xsweep:
-.ONESHELL: xsweep
-xsweep:
-	. $(VENV)/bin/activate && python - <<'PY'
-import subprocess, sys, yaml
-with open("$(CONFIG)", "r", encoding="utf-8") as fh:
-    cfg = yaml.safe_load(fh) or {}
-seeds = cfg.get("seeds", [])
-rc = 0
-for s in seeds:
-    rc |= subprocess.call([
-        "bash","-lc",
-        ". .venv/bin/activate && python scripts/run_experiment.py --config $(CONFIG) --seed %d" % s,
-    ])
-sys.exit(rc)
-PY
 
-	sys.exit(rc)
-	PY
+xsweep:
+	if [ -f "$(VENV)/bin/activate" ]; then \
+		. "$(VENV)/bin/activate" && python scripts/xsweep.py --config $(CONFIG) $(MODE_ARG) $(TRIALS_ARG); \
+	else \
+		python scripts/xsweep.py --config $(CONFIG) $(MODE_ARG) $(TRIALS_ARG); \
+	fi
 
 sweep3:
 	$(MAKE) sweep SEEDS="41,42,43" TRIALS=5 MODE=SHIM
 
 aggregate:
 	if [ -x "$(PY)" ]; then \
-aggregate:
-	if [ -x "$(PY)" ]; then \
 		"$(PY)" scripts/aggregate_results.py; \
 	else \
 		python scripts/aggregate_results.py; \
-	fi
-
 	fi
 
 plot:
@@ -81,7 +74,6 @@ report: aggregate plot
 		"$(PY)" scripts/update_readme_results.py; \
 	else \
 		python scripts/update_readme_results.py; \
-
 	fi
 
 real1:
