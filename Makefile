@@ -1,4 +1,4 @@
-.PHONY: venv install test run sweep aggregate report scaffold check-schema
+.PHONY: venv install test run sweep aggregate report scaffold check-schema plot
 
 VENV := .venv
 PY   := $(VENV)/bin/python
@@ -15,7 +15,7 @@ venv:
 	$(PY) -m pip install -U pip
 
 install: venv
-	$(PIP) install -U doomarena doomarena-taubench pytest pyyaml pandas
+	$(PIP) install -U doomarena doomarena-taubench pytest pyyaml pandas matplotlib
 	$(PY) scripts/ensure_tau_bench.py || (echo "tau_bench unavailable; continuing without real τ-Bench" && exit 0)
 
 test: install
@@ -32,10 +32,25 @@ sweep:
 	$(MAKE) report
 
 aggregate:
-	$(PY) scripts/aggregate_results.py
+	if [ -x "$(PY)" ]; then \
+		"$(PY)" scripts/aggregate_results.py; \
+	else \
+		python scripts/aggregate_results.py; \
+	fi
 
-report: aggregate
-	$(PY) scripts/update_readme_results.py
+plot:
+	if [ -f "$(VENV)/bin/activate" ]; then \
+		. "$(VENV)/bin/activate" && python scripts/plot_results.py --exp $(EXP); \
+	else \
+		python scripts/plot_results.py --exp $(EXP); \
+	fi
+
+report: aggregate plot
+	if [ -x "$(PY)" ]; then \
+		"$(PY)" scripts/update_readme_results.py; \
+	else \
+		python scripts/update_readme_results.py; \
+	fi
 
 scaffold:
 	mkdir -p adapters attacks defenses filters configs/airline_escalating_v1 results analysis
