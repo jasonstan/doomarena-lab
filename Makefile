@@ -1,4 +1,4 @@
-.PHONY: venv install test run sweep aggregate report scaffold check-schema plot
+.PHONY: venv install test run sweep aggregate report scaffold check-schema plot sweep3 real1
 
 VENV := .venv
 PY   := $(VENV)/bin/python
@@ -28,14 +28,17 @@ run:
 	. .venv/bin/activate && python scripts/run_batch.py --exp $(EXP) --seeds "$(SEED)" --trials $(TRIALS) --mode $(MODE)
 
 sweep:
-	. .venv/bin/activate && python scripts/run_batch.py --exp $(EXP) --seeds "$(SEEDS)" --trials $(TRIALS) --mode $(MODE)
-	$(MAKE) report
+        . .venv/bin/activate && python scripts/run_batch.py --exp $(EXP) --seeds "$(SEEDS)" --trials $(TRIALS) --mode $(MODE)
+        $(MAKE) report
+
+sweep3:
+        $(MAKE) sweep SEEDS="41,42,43" TRIALS=5 MODE=SHIM
 
 aggregate:
-	if [ -x "$(PY)" ]; then \
-		"$(PY)" scripts/aggregate_results.py; \
-	else \
-		python scripts/aggregate_results.py; \
+        if [ -x "$(PY)" ]; then \
+                "$(PY)" scripts/aggregate_results.py; \
+        else \
+                python scripts/aggregate_results.py; \
 	fi
 
 plot:
@@ -46,14 +49,17 @@ plot:
 	fi
 
 report: aggregate plot
-	if [ -x "$(PY)" ]; then \
-		"$(PY)" scripts/update_readme_results.py; \
-	else \
-		python scripts/update_readme_results.py; \
-	fi
+        if [ -x "$(PY)" ]; then \
+                "$(PY)" scripts/update_readme_results.py; \
+        else \
+                python scripts/update_readme_results.py; \
+        fi
+
+real1:
+        $(MAKE) run SEED=42 TRIALS=5 MODE=REAL
 
 scaffold:
-	mkdir -p adapters attacks defenses filters configs/airline_escalating_v1 results analysis
+        mkdir -p adapters attacks defenses filters configs/airline_escalating_v1 results analysis
 
 .PHONY: journal
 journal: install
