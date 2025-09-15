@@ -1,9 +1,14 @@
-.PHONY: venv install test run aggregate report scaffold
+.PHONY: venv install test run sweep aggregate report scaffold
 
 VENV := .venv
 PY   := $(VENV)/bin/python
 PIP  := $(VENV)/bin/pip
 CONFIG ?= configs/airline_escalating_v1/run.yaml
+SEED ?= 42
+SEEDS ?= 41,42,43
+TRIALS ?= 5
+EXP ?= airline_escalating_v1
+MODE ?= SHIM
 
 venv:
 	python -m venv $(VENV)
@@ -16,12 +21,12 @@ install: venv
 test: install
 	$(PY) -m pytest -q
 
-run: install
-	@if [ ! -f scripts/taubench_airline_da.py ]; then \
-	  echo "scripts/taubench_airline_da.py not found in this PR. Merge the engine-v2 PR (adds the runner) or create the script."; \
-	  exit 1; \
-	fi
-	$(PY) scripts/taubench_airline_da.py --config $(CONFIG)
+run:
+	. .venv/bin/activate && python scripts/run_batch.py --exp $(EXP) --seeds "$(SEED)" --trials $(TRIALS) --mode $(MODE)
+
+sweep:
+	. .venv/bin/activate && python scripts/run_batch.py --exp $(EXP) --seeds "$(SEEDS)" --trials $(TRIALS) --mode $(MODE)
+	$(MAKE) report
 
 aggregate:
 	$(PY) scripts/aggregate_results.py

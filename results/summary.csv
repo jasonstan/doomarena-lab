@@ -1,0 +1,4 @@
+timestamp,git_sha,exp,seed,mode,trials,successes,asr,py_version,path
+2025-09-15T18:51:51.431892+00:00,7b3d126,airline_escalating_v1,41,SHIM,5,3,0.600000,3.11.12,results/airline_escalating_v1/airline_escalating_v1_seed41.jsonl
+2025-09-15T18:51:51.434372+00:00,7b3d126,airline_escalating_v1,42,SHIM,5,3,0.600000,3.11.12,results/airline_escalating_v1/airline_escalating_v1_seed42.jsonl
+2025-09-15T18:51:51.436689+00:00,7b3d126,airline_escalating_v1,43,SHIM,5,3,0.600000,3.11.12,results/airline_escalating_v1/airline_escalating_v1_seed43.jsonl
