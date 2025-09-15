@@ -22,6 +22,14 @@ make plot
 make real1
 ```
 
+### Run an experiment
+
+```bash
+make xsweep CONFIG=configs/airline_escalating_v1/exp.yaml
+head -5 results/summary.csv
+ls -R results/*
+```
+
 ### Swapping to real DoomArena classes
 
 This repo currently uses thin adapters to mirror DoomArena concepts:

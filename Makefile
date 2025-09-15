@@ -1,4 +1,4 @@
-.PHONY: venv install test run sweep aggregate report scaffold check-schema plot sweep3 real1
+.PHONY: venv install test run sweep aggregate report scaffold check-schema plot sweep3 real1 xrun xsweep
 
 VENV := .venv
 PY   := $(VENV)/bin/python
@@ -27,23 +27,31 @@ check-schema: venv
 run:
 	. .venv/bin/activate && python scripts/run_batch.py --exp $(EXP) --seeds "$(SEED)" --trials $(TRIALS) --mode $(MODE)
 
+xrun:
+	. .venv/bin/activate && python scripts/run_experiment.py --config $(CONFIG) --seed $(SEED)
+
 sweep:
 	. .venv/bin/activate && python scripts/run_batch.py --exp $(EXP) --seeds "$(SEEDS)" --trials $(TRIALS) --mode $(MODE)
 	$(MAKE) report
 
 .ONESHELL: xsweep
 xsweep:
-	. .venv/bin/activate && python - <<-'PY'
-	import subprocess, sys, yaml
-        with open("$(CONFIG)", "r", encoding="utf-8") as cfg_file:
-            cfg = yaml.safe_load(cfg_file) or {}
-	seeds = cfg.get("seeds", [])
-	rc = 0
-	for s in seeds:
-	    rc |= subprocess.call([
-	        "bash", "-lc",
-	        ". .venv/bin/activate && python scripts/run_experiment.py --config $(CONFIG) --seed %d" % s,
-	    ])
+.ONESHELL: xsweep
+xsweep:
+	. $(VENV)/bin/activate && python - <<'PY'
+import subprocess, sys, yaml
+with open("$(CONFIG)", "r", encoding="utf-8") as fh:
+    cfg = yaml.safe_load(fh) or {}
+seeds = cfg.get("seeds", [])
+rc = 0
+for s in seeds:
+    rc |= subprocess.call([
+        "bash","-lc",
+        ". .venv/bin/activate && python scripts/run_experiment.py --config $(CONFIG) --seed %d" % s,
+    ])
+sys.exit(rc)
+PY
+
 	sys.exit(rc)
 	PY
 
@@ -52,9 +60,13 @@ sweep3:
 
 aggregate:
 	if [ -x "$(PY)" ]; then \
+aggregate:
+	if [ -x "$(PY)" ]; then \
 		"$(PY)" scripts/aggregate_results.py; \
 	else \
 		python scripts/aggregate_results.py; \
+	fi
+
 	fi
 
 plot:
@@ -64,13 +76,12 @@ plot:
 		python scripts/plot_results.py --exp $(EXP); \
 	fi
 
-# plot stays as-is above…
-
 report: aggregate plot
 	if [ -x "$(PY)" ]; then \
 		"$(PY)" scripts/update_readme_results.py; \
 	else \
 		python scripts/update_readme_results.py; \
+
 	fi
 
 real1:
