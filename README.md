@@ -23,8 +23,10 @@ This repo currently uses thin adapters to mirror DoomArena concepts:
 ## Results
 <!-- RESULTS:BEGIN -->
 
-| run_id | ASR | trials | path |
-| --- | --- | --- | --- |
-| [airline_escalating_seed42](results/airline_escalating_v1/airline_escalating_seed42.jsonl) | 0.600 | 5 | SHIM |
+| run_id | ASR | trials | path | seed |
+| --- | --- | --- | --- | --- |
+| [airline_escalating_seed99](results/airline_escalating_v1/airline_escalating_seed99.jsonl) | 0.60 (3/5) | 5 | SHIM | 99 |
+| [airline_escalating_seed7](results/airline_escalating_v1/airline_escalating_seed7.jsonl) | 0.60 (3/5) | 5 | SHIM | 7 |
+| [airline_escalating_seed42](results/airline_escalating_v1/airline_escalating_seed42.jsonl) | 0.60 (3/5) | 5 | SHIM | 42 |
 
 <!-- RESULTS:END -->
