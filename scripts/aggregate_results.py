@@ -1,293 +1,237 @@
+from __future__ import annotations
+
 import csv
 import json
-import platform
-import re
-import subprocess
-import sys
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Tuple
 
-from exp import SUMMARY_COLUMNS, read_summary as load_summary_rows
-
-SEED_PATTERN = re.compile(r"_seed(?P<seed>\d+)\.jsonl$")
-
-
-def generate_if_needed(base_dir: Path) -> None:
-    jsonl_files = list(base_dir.rglob("*.jsonl"))
-    if jsonl_files:
-        return
-    cmd = [
-        sys.executable,
-        "scripts/taubench_airline_da_real.py",
-        "--config",
-        "configs/airline_escalating_v1/run.yaml",
-    ]
-    subprocess.run(cmd, check=True)
+SUMMARY_COLUMNS: Tuple[str, ...] = (
+    "exp_id",
+    "exp",
+    "config",
+    "cfg_hash",
+    "mode",
+    "seeds",
+    "trials",
+    "successes",
+    "asr",
+    "git_commit",
+    "run_at",
+)
 
 
-def parse_jsonl(path: Path) -> Tuple[int, int, float, Optional[str]]:
-    summary: Optional[Dict] = None
+def read_jsonl(path: Path) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    header: Dict[str, Any] | None = None
+    summary: Dict[str, Any] | None = None
     with path.open("r", encoding="utf-8") as handle:
         for line in handle:
+            line = line.strip()
+            if not line:
+                continue
             try:
-                data = json.loads(line)
+                payload = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            if data.get("event") == "summary":
-                summary = data
+            if not isinstance(payload, dict):
+                continue
+            event = payload.get("event")
+            if event == "header" and header is None:
+                header = payload
+            elif event == "summary":
+                summary = payload
+    if header is None:
+        raise RuntimeError(f"Missing header in {path}")
     if summary is None:
         raise RuntimeError(f"Missing summary in {path}")
-    trials = int(summary.get("trials", 0))
-    if trials < 0:
-        trials = 0
-    successes = int(summary.get("successes", 0))
-    if successes < 0:
-        successes = 0
-    if successes > trials:
-        successes = trials
-    asr = summary.get("asr")
-    if asr is None:
-        asr = successes / trials if trials else 0.0
-    asr_value = float(asr)
-    if asr_value < 0.0:
-        asr_value = 0.0
-    elif asr_value > 1.0:
-        asr_value = 1.0
-    mode = summary.get("mode")
-    return trials, successes, asr_value, mode
+    return header, summary
 
 
-def get_current_commit() -> str:
-    return (
-        subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], text=True)
-        .strip()
-    )
-
-
-def extract_seed(path: Path) -> str:
-    match = SEED_PATTERN.search(path.name)
-    if match:
-        return match.group("seed")
-    return ""
-
-
-def generate_run_id() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
-
-
-def _git_diff_is_clean(args: Optional[List[str]] = None) -> bool:
-    cmd = ["git", "diff", "--quiet"]
-    if args:
-        cmd.extend(args)
-    result = subprocess.run(cmd, check=False)
-    return result.returncode == 0
-
-
-def repo_is_dirty() -> bool:
-    if not _git_diff_is_clean():
-        return True
-    if not _git_diff_is_clean(["--cached"]):
-        return True
-    return False
-
-
-def normalize_mode(mode: Optional[str]) -> str:
-    if not mode:
-        return "SHIM"
-    value = str(mode).upper()
-    if value not in {"REAL", "SHIM"}:
-        return "SHIM"
-    return value
-
-
-def load_meta(jsonl_path: Path) -> Optional[Dict[str, Any]]:
-    meta_path = jsonl_path.parent / "meta.json"
-    if not meta_path.exists():
-        return None
+def _normalise_int(value: Any) -> int:
     try:
-        with meta_path.open("r", encoding="utf-8") as handle:
-            data = json.load(handle)
-    except (OSError, json.JSONDecodeError):
-        return None
-    if not isinstance(data, dict):
-        return None
-    return data
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
 
 
-def read_existing(summary_path: Path) -> Dict[Tuple[str, str], Dict[str, str]]:
-    rows: Dict[Tuple[str, str], Dict[str, str]] = {}
-    for row in load_summary_rows(summary_path):
-        exp = row.get("exp", "")
-        seed = row.get("seed", "")
-        if exp:
-            rows[(exp, seed)] = dict(row)
-    return rows
+def _normalise_float(value: Any) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
 
 
-def build_rows(base_dir: Path, existing: Dict[Tuple[str, str], Dict[str, str]]) -> List[Dict[str, str]]:
-    commit = get_current_commit()
-    default_python_version = platform.python_version()
-    now_iso = datetime.now(timezone.utc).isoformat()
-    run_id = generate_run_id()
-    repo_dirty = repo_is_dirty()
-    rows: Dict[Tuple[str, str], Dict[str, str]] = dict(existing)
-    seen_keys: set[Tuple[str, str]] = set()
+def _stringify(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value)
 
-    for path in sorted(base_dir.rglob("*.jsonl")):
-        exp = path.parent.name
-        seed = extract_seed(path)
-        key = (exp, seed)
-        trials, successes, asr, mode_hint = parse_jsonl(path)
-        asr = max(0.0, min(1.0, asr))
-        row = dict(rows.get(key, {}))
-        meta = load_meta(path)
 
-        timestamp = row.get("timestamp") or now_iso
-        if meta and meta.get("timestamp"):
-            timestamp = str(meta.get("timestamp"))
+def _collect_seeds(header: Dict[str, Any]) -> str:
+    seen: set[str] = set()
+    ordered: List[str] = []
 
-        git_sha_value = row.get("git_sha") or commit
-        if meta and meta.get("git_sha"):
-            git_sha_value = str(meta.get("git_sha"))
+    def _add(item: Any) -> None:
+        text = _stringify(item).strip()
+        if not text:
+            return
+        if text in seen:
+            return
+        seen.add(text)
+        ordered.append(text)
 
-        git_branch_value = row.get("git_branch", "")
-        if meta and meta.get("git_branch"):
-            git_branch_value = str(meta.get("git_branch"))
+    if "seed" in header:
+        _add(header.get("seed"))
 
-        repo_dirty_value = row.get("repo_dirty") or ("true" if repo_dirty else "false")
+    seeds_value = header.get("seeds")
+    if isinstance(seeds_value, (list, tuple)):
+        for item in seeds_value:
+            _add(item)
+    elif isinstance(seeds_value, str):
+        for chunk in seeds_value.split(","):
+            _add(chunk)
+    elif seeds_value is not None:
+        _add(seeds_value)
 
-        exp_id_value = row.get("exp_id", "")
-        if meta and meta.get("exp_id"):
-            exp_id_value = str(meta.get("exp_id"))
+    return ",".join(ordered)
 
-        if meta and meta.get("mode"):
-            mode = normalize_mode(str(meta.get("mode")))
-        else:
-            mode = normalize_mode(mode_hint or row.get("mode"))
 
-        trials_value: Optional[str] = row.get("trials")
-        if meta and meta.get("trials") is not None:
-            meta_trials = meta.get("trials")
-            try:
-                trials_value = str(int(meta_trials))
-            except (TypeError, ValueError):
-                trials_value = str(meta_trials)
-        if not trials_value:
-            trials_value = str(trials)
+def build_row(path: Path, header: Dict[str, Any], summary: Dict[str, Any]) -> Dict[str, str]:
+    exp_id = _stringify(header.get("exp_id"))
+    exp = _stringify(header.get("exp"))
+    config = _stringify(header.get("config"))
+    cfg_hash_value = _stringify(header.get("cfg_hash"))
+    mode = _stringify(header.get("mode"))
+    git_commit = _stringify(header.get("git_commit"))
+    run_at = _stringify(header.get("run_at"))
+    seeds = _collect_seeds(header)
 
-        python_version_value = row.get("python_version", "")
-        if meta and meta.get("python_version"):
-            python_version_value = str(meta.get("python_version"))
-        elif not python_version_value:
-            python_version_value = default_python_version
+    trials = _normalise_int(summary.get("trials"))
+    successes = _normalise_int(summary.get("successes"))
+    if trials > 0 and successes > trials:
+        successes = trials
+    asr_value = summary.get("asr")
+    if asr_value is None and trials:
+        asr_value = successes / trials
+    asr = _normalise_float(asr_value)
+    if asr < 0.0:
+        asr = 0.0
+    elif asr > 1.0:
+        asr = 1.0
 
-        packages_value = row.get("packages", "")
-        if meta and meta.get("packages") is not None:
-            packages_meta = meta.get("packages")
-            if isinstance(packages_meta, dict):
-                packages_value = json.dumps(packages_meta, sort_keys=True)
-            else:
-                packages_value = str(packages_meta)
+    row = {
+        "exp_id": exp_id,
+        "exp": exp,
+        "config": config,
+        "cfg_hash": cfg_hash_value,
+        "mode": mode,
+        "seeds": seeds,
+        "trials": str(trials),
+        "successes": str(successes),
+        "asr": f"{asr:.6f}",
+        "git_commit": git_commit,
+        "run_at": run_at,
+    }
+    return row
 
-        seeds_value = row.get("seeds", "")
-        if meta and meta.get("seeds") is not None:
-            seeds_meta = meta.get("seeds")
-            if isinstance(seeds_meta, (list, tuple)):
-                seeds_value = ",".join(str(item) for item in seeds_meta)
-            else:
-                seeds_value = str(seeds_meta)
 
-        row.update(
-            {
-                "timestamp": timestamp,
-                "run_id": row.get("run_id") or run_id,
-                "git_sha": git_sha_value,
-                "git_branch": git_branch_value,
-                "repo_dirty": repo_dirty_value,
-                "exp": exp,
-                "exp_id": exp_id_value,
-                "seed": seed,
-                "mode": mode,
-                "trials": str(trials_value),
-                "successes": str(successes),
-                "asr": f"{asr:.6f}",
-                "python_version": python_version_value,
-                "packages": packages_value,
-                "seeds": seeds_value,
-                "path": path.as_posix(),
-            }
-        )
-        rows[key] = {column: row.get(column, "") for column in SUMMARY_COLUMNS}
+def read_existing(path: Path) -> List[Dict[str, str]]:
+    if not path.exists():
+        return []
+    with path.open("r", encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader(handle)
+        if reader.fieldnames != list(SUMMARY_COLUMNS):
+            return []
+        return [dict(row) for row in reader]
+
+
+def merge_rows(existing: List[Dict[str, str]], new_rows: Iterable[Dict[str, str]]) -> List[Dict[str, str]]:
+    combined = list(existing)
+    seen_keys = {
+        (row.get("exp_id", ""), row.get("run_at", ""))
+        for row in combined
+    }
+    for row in new_rows:
+        key = (row.get("exp_id", ""), row.get("run_at", ""))
+        if key in seen_keys:
+            continue
+        combined.append(row)
         seen_keys.add(key)
-
-    normalized_rows: List[Dict[str, str]] = []
-    for (exp, seed), row in rows.items():
-        if seen_keys and (exp, seed) not in seen_keys:
-            continue
-        if not exp:
-            continue
-        normalized_rows.append({column: row.get(column, "") for column in SUMMARY_COLUMNS})
-
-    normalized_rows.sort(
-        key=lambda item: (
-            item.get("exp", ""),
-            int(item.get("seed", "0")) if item.get("seed", "").isdigit() else item.get("seed", ""),
-        )
-    )
-    return normalized_rows
+    combined.sort(key=lambda item: item.get("run_at", ""))
+    return combined
 
 
-def write_summary(summary_path: Path, rows: List[Dict[str, str]]) -> None:
-    summary_path.parent.mkdir(parents=True, exist_ok=True)
-    with summary_path.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=SUMMARY_COLUMNS)
+def write_summary(path: Path, rows: Iterable[Dict[str, str]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(SUMMARY_COLUMNS))
         writer.writeheader()
         for row in rows:
-            writer.writerow(row)
+            payload = {column: row.get(column, "") for column in SUMMARY_COLUMNS}
+            writer.writerow(payload)
 
 
 def write_summary_md(base_dir: Path, rows: List[Dict[str, str]]) -> None:
     md_path = base_dir / "summary.md"
     md_path.parent.mkdir(parents=True, exist_ok=True)
-    recent = sorted(rows, key=lambda item: item.get("timestamp", ""), reverse=True)[:5]
-    with md_path.open("w", encoding="utf-8") as handle:
-        handle.write("| exp | seed | mode | ASR | trials | successes | path |\n")
-        handle.write("| --- | --- | --- | --- | --- | --- | --- |\n")
-        for row in recent:
-            asr_display = ""
-            try:
-                asr_value = float(row.get("asr", ""))
-            except (TypeError, ValueError):
-                asr_value = None
-            if asr_value is not None:
-                asr_display = f"{asr_value:.2f} ({row.get('successes', '')}/{row.get('trials', '')})"
-            link = ""
-            if row.get("path"):
-                link = f"[{Path(row['path']).stem}]({row['path']})"
-            handle.write(
-                "| {exp} | {seed} | {mode} | {asr} | {trials} | {successes} | {link} |\n".format(
-                    exp=row.get("exp", ""),
-                    seed=row.get("seed", ""),
-                    mode=row.get("mode", ""),
-                    asr=asr_display,
-                    trials=row.get("trials", ""),
-                    successes=row.get("successes", ""),
-                    link=link,
-                )
+    if not rows:
+        md_path.write_text("No results available.\n", encoding="utf-8")
+        return
+
+    recent = sorted(rows, key=lambda item: item.get("run_at", ""), reverse=True)[:5]
+    lines = [
+        "| exp | seeds | mode | ASR | trials | successes | git | run_at |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for row in recent:
+        try:
+            asr_display = f"{float(row.get('asr', 0.0)):.2f}"
+        except (TypeError, ValueError):
+            asr_display = _stringify(row.get("asr"))
+        successes = row.get("successes", "")
+        trials = row.get("trials", "")
+        if asr_display and successes and trials:
+            asr_display = f"{asr_display} ({successes}/{trials})"
+        git_commit = row.get("git_commit", "")[:8]
+        lines.append(
+            "| {exp} | {seeds} | {mode} | {asr} | {trials} | {successes} | {git} | {run_at} |".format(
+                exp=row.get("exp", ""),
+                seeds=row.get("seeds", ""),
+                mode=row.get("mode", ""),
+                asr=asr_display,
+                trials=trials,
+                successes=successes,
+                git=git_commit,
+                run_at=row.get("run_at", ""),
             )
+        )
+    md_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def main() -> None:
     base_dir = Path("results")
-    base_dir.mkdir(exist_ok=True)
-    generate_if_needed(base_dir)
-
+    base_dir.mkdir(parents=True, exist_ok=True)
     summary_path = base_dir / "summary.csv"
+
+    jsonl_files = sorted(base_dir.rglob("*.jsonl"))
+    new_rows: List[Dict[str, str]] = []
+    for path in jsonl_files:
+        try:
+            header, summary = read_jsonl(path)
+        except RuntimeError as exc:
+            print(f"Skipping {path}: {exc}")
+            continue
+        try:
+            row = build_row(path, header, summary)
+        except Exception as exc:  # pragma: no cover - defensive fallback
+            print(f"Failed to process {path}: {exc}")
+            continue
+        new_rows.append(row)
+
     existing_rows = read_existing(summary_path)
-    rows = build_rows(base_dir, existing_rows)
-    write_summary(summary_path, rows)
-    write_summary_md(base_dir, rows)
+    combined_rows = merge_rows(existing_rows, new_rows)
+
+    write_summary(summary_path, combined_rows)
+    write_summary_md(base_dir, combined_rows)
 
 
 if __name__ == "__main__":
