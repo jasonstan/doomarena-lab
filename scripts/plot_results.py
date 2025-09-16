@@ -38,8 +38,16 @@ def parse_run_at(raw: str) -> Optional[datetime]:
 
     if not raw:
         return None
+
+    text = raw.strip()
+    if not text:
+        return None
+
+    if text.endswith("Z") or text.endswith("z"):
+        text = text[:-1] + "+00:00"
+
     try:
-        dt = datetime.fromisoformat(raw)
+        dt = datetime.fromisoformat(text)
     except ValueError:
         return None
     if dt.tzinfo is not None:
