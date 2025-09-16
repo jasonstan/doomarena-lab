@@ -5,21 +5,32 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import csv, pathlib, statistics
-from collections import defaultdict
 import argparse
+import csv
+import math
+import pathlib
 import sys
-from typing import Dict, List, Optional, Tuple
+from collections import defaultdict
+from dataclasses import dataclass
+from typing import Dict, Iterable, List, Optional
 
 CSV = pathlib.Path("results/summary.csv")
 OUT_SVG = pathlib.Path("results/summary.svg")
 OUT_PNG = pathlib.Path("results/summary.png")
 
 
-def load_rows(csv_path: pathlib.Path) -> List[Tuple[str, float]]:
-    """Return ``(experiment, asr)`` rows from the CSV, normalising headers."""
+@dataclass
+class SummaryRow:
+    exp: str
+    asr: Optional[float]
+    trials: Optional[float]
+    successes: Optional[float]
 
-    rows: List[Tuple[str, float]] = []
+
+def load_rows(csv_path: pathlib.Path) -> List[SummaryRow]:
+    """Return rows from the CSV with normalised headers."""
+
+    rows: List[SummaryRow] = []
     with csv_path.open(newline="") as handle:
         reader = csv.DictReader(handle)
         if reader.fieldnames is None:
@@ -36,37 +47,73 @@ def load_rows(csv_path: pathlib.Path) -> List[Tuple[str, float]]:
             if "exp" not in normalised:
                 continue
 
+            exp_value = normalised.get("exp", "")
+            exp_text = str(exp_value).strip() if exp_value is not None else ""
+            if not exp_text:
+                exp_text = "<unknown>"
             asr_source: Optional[object]
             if "asr" in normalised:
                 asr_source = normalised["asr"]
             else:
                 asr_source = normalised.get("attack_success_rate")
-            if asr_source is None:
-                continue
 
-            try:
-                asr_value = float(asr_source)
-            except (TypeError, ValueError):
-                continue
+            def parse_optional_float(value: Optional[object]) -> Optional[float]:
+                if value is None:
+                    return None
+                if isinstance(value, str):
+                    value = value.strip()
+                    if not value:
+                        return None
+                try:
+                    parsed = float(value)
+                except (TypeError, ValueError):
+                    return None
+                if math.isnan(parsed):
+                    return None
+                return parsed
 
-            exp_value = normalised.get("exp", "")
-            exp_text = str(exp_value).strip() if exp_value is not None else ""
-            if not exp_text:
-                exp_text = "<unknown>"
-            rows.append((exp_text, asr_value))
+            asr_value = parse_optional_float(asr_source)
+            trials_value = parse_optional_float(normalised.get("trials"))
+            successes_value = parse_optional_float(normalised.get("successes"))
+
+            rows.append(
+                SummaryRow(
+                    exp=exp_text,
+                    asr=asr_value,
+                    trials=trials_value,
+                    successes=successes_value,
+                )
+            )
     return rows
 
 
-def aggregate_means(rows: List[Tuple[str, float]]) -> Tuple[List[str], List[float]]:
-    """Aggregate mean ASR per experiment name."""
+def weighted_asr_by_exp(rows: Iterable[SummaryRow]) -> Dict[str, float]:
+    """Compute trial-weighted ASR per experiment.
 
-    grouped: Dict[str, List[float]] = defaultdict(list)
-    for exp, asr in rows:
-        grouped[exp].append(asr)
+    Uses total successes / total trials when available, falling back to
+    sum(asr * trials) / sum(trials) if successes is missing.
+    """
 
-    experiments = sorted(grouped.keys())
-    means = [statistics.fmean(grouped[exp]) for exp in experiments]
-    return experiments, means
+    totals_succ: Dict[str, float] = defaultdict(float)
+    totals_trials: Dict[str, float] = defaultdict(float)
+
+    for row in rows:
+        exp = row.exp or ""
+        trials = row.trials
+        if trials is None:
+            continue
+
+        totals_trials[exp] += float(trials)
+
+        if row.successes is not None:
+            totals_succ[exp] += float(row.successes)
+        elif row.asr is not None:
+            totals_succ[exp] += float(row.asr) * float(trials)
+
+    return {
+        exp: (totals_succ[exp] / total_trials) if total_trials else float("nan")
+        for exp, total_trials in totals_trials.items()
+    }
 
 
 def plot_summary(experiments: List[str], means: List[float]) -> None:
@@ -81,11 +128,21 @@ def plot_summary(experiments: List[str], means: List[float]) -> None:
     ax.bar(positions, means, width=0.6)
 
     ax.set_ylim(0.0, 1.0)
-    ax.set_ylabel("ASR")
+    ax.set_ylabel("ASR (successes ÷ trials)")
     if len(experiments) == 1:
         ax.set_title(f"Attack Success Rate — {experiments[0]}")
     else:
         ax.set_title("Attack Success Rate by Experiment")
+
+    fig.text(
+        0.02,
+        0.02,
+        "Bars are weighted by total trials per experiment.",
+        ha="left",
+        va="bottom",
+        fontsize=8,
+        color="0.3",
+    )
 
     ax.set_xticks(list(positions))
     ax.set_xticklabels(
@@ -119,10 +176,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         raise SystemExit("results/summary.csv not found; run `make report` first")
 
     rows = load_rows(CSV)
-    if not rows:
+    aggregates = weighted_asr_by_exp(rows)
+    if not aggregates:
         raise SystemExit("No usable rows in results/summary.csv")
 
-    experiments, means = aggregate_means(rows)
+    experiments = sorted(aggregates.keys())
+    means = [aggregates[exp] for exp in experiments]
     plot_summary(experiments, means)
     return 0
 
