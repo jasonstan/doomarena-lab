@@ -1,4 +1,4 @@
-.PHONY: venv install test run sweep aggregate report scaffold check-schema plot sweep3 real1 xrun xsweep xsweep-all topn
+.PHONY: venv install test run sweep aggregate report scaffold check-schema plot sweep3 real1 xrun xsweep xsweep-all topn demo
 
 VENV := .venv
 PY   := $(VENV)/bin/python
@@ -57,6 +57,12 @@ xrun:
 
 sweep:
 	. .venv/bin/activate && python scripts/run_batch.py --exp $(EXP) --seeds "$(SEEDS)" --trials $(TRIALS) --mode $(MODE)
+	$(MAKE) report
+
+.PHONY: demo
+demo:
+	$(MAKE) xsweep CONFIG=configs/airline_escalating_v1/run.yaml EXP=airline_escalating_v1 TRIALS=3 SEEDS="11,12" MODE=SHIM
+	$(MAKE) xsweep CONFIG=configs/airline_static_v1/run.yaml     EXP=airline_static_v1     TRIALS=3 SEEDS="11,12" MODE=SHIM
 	$(MAKE) report
 
 .ONESHELL: xsweep
