@@ -19,6 +19,8 @@ SUMMARY_CSV = Path("results/summary.csv")
 PLOTS_DIR = Path("results/plots")
 ASR_BY_SEED_PATH = PLOTS_DIR / "asr_by_seed.png"
 ASR_OVER_TIME_PATH = PLOTS_DIR / "asr_over_time.png"
+SUMMARY_SVG_PATH = Path("results/summary.svg")
+SUMMARY_PNG_PATH = Path("results/summary.png")
 
 
 @dataclass
@@ -127,9 +129,14 @@ def plot_asr_by_seed(rows: Iterable[SummaryRow], exp: str) -> None:
     ax.grid(axis="y", linestyle="--", alpha=0.4)
     fig.tight_layout()
     PLOTS_DIR.mkdir(parents=True, exist_ok=True)
+    SUMMARY_SVG_PATH.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(ASR_BY_SEED_PATH, dpi=150)
+    fig.savefig(SUMMARY_SVG_PATH, bbox_inches="tight")
+    fig.savefig(SUMMARY_PNG_PATH, dpi=144, bbox_inches="tight")
     plt.close(fig)
     print(f"Wrote {ASR_BY_SEED_PATH}")
+    print(f"Wrote {SUMMARY_SVG_PATH}")
+    print(f"Wrote {SUMMARY_PNG_PATH}")
 
 
 def plot_asr_over_time(rows: Iterable[SummaryRow], exp: str) -> None:
