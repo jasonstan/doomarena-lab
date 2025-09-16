@@ -1,22 +1,27 @@
 name: smoke
 
 on:
+  push:
+    branches: [ main ]
+    paths-ignore:
+      - 'README.md'
+      - 'docs/**'
   pull_request:
     branches: [ main ]
+    paths-ignore:
+      - 'README.md'
+      - 'docs/**'
   workflow_dispatch:
 
+concurrency:
+  group: smoke-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  smoke:
+  shim:
+    name: SHIM sweep
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    env:
-      # Headless plotting for matplotlib
-      MPLBACKEND: Agg
-      # Makefile overrides we want for a quick SHIM sweep
-      EXP: airline_escalating_v1
-      MODE: SHIM
-      SEEDS: "41,42,43"
-      TRIALS: "5"
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -24,38 +29,34 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-          cache: pip
-          cache-dependency-path: requirements-ci.txt
+          python-version: '3.11'
+          cache: 'pip'
 
-      - name: Create venv and install deps
-        shell: bash
+      - name: Install dependencies
         run: |
           python -m venv .venv
-          source .venv/bin/activate
-          pip install -U pip wheel
-          pip install -r requirements-ci.txt
+          . .venv/bin/activate
+          python -m pip install -U pip wheel
+          pip install -U doomarena doomarena-taubench pytest pyyaml matplotlib
 
-      - name: Smoke: sweep + report (SHIM)
-        shell: bash
+      - name: Run SHIM sweep
+        env:
+          EXP: airline_escalating_v1
+          TRIALS: '5'
+          SEEDS: '41,42,43'
+          MODE: SHIM
         run: |
-          source .venv/bin/activate
-          make sweep EXP="$EXP" MODE="$MODE" SEEDS="$SEEDS" TRIALS="$TRIALS"
-          echo "---- results/summary.csv (head) ----"
-          head -5 results/summary.csv || true
-          echo "---- grep ASR from run logs if present ----"
-          grep -R --line-number -E 'ASR=' || true
+          . .venv/bin/activate
+          make xsweep EXP="$EXP" TRIALS="$TRIALS" SEEDS="$SEEDS" MODE="$MODE"
+          make report
 
-      - name: Upload CSV
+      - name: Upload results
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: results-csv
-          path: results/summary.csv
-          if-no-files-found: ignore
-
-      - name: Upload plot
-        uses: actions/upload-artifact@v4
-        with:
-          name: results-plot
-          path: results/summary.png
-          if-no-files-found: ignore
+          name: results
+          path: |
+            results/**
+            results/summary.csv
+            results/summary.png
+          if-no-files-found: warn
