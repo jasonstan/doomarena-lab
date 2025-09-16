@@ -129,6 +129,6 @@ install-tau: install
 	$(PY) scripts/ensure_tau_bench.py || (echo "tau_bench unavailable; continuing without real τ-Bench" && exit 0)
 
 .PHONY: ci
-ci:
+ci: install
 	$(MAKE) xsweep MODE=SHIM TRIALS=3 SEEDS=41,42
 	$(MAKE) report
