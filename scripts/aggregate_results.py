@@ -95,17 +95,72 @@ def _collect_seeds(header: Dict[str, Any]) -> str:
     return ",".join(ordered)
 
 
+def _load_meta(path: Path) -> Dict[str, Any] | None:
+    candidates = [
+        path.with_suffix(".meta.json"),
+        path.parent / "meta.json",
+    ]
+    for candidate in candidates:
+        if not candidate.exists():
+            continue
+        try:
+            with candidate.open("r", encoding="utf-8") as handle:
+                data = json.load(handle)
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(data, dict):
+            return data
+    return None
+
+
+def _stringify_seeds(value: Any) -> str:
+    if isinstance(value, (list, tuple)):
+        parts: List[str] = []
+        for item in value:
+            text = _stringify(item).strip()
+            if text and text not in parts:
+                parts.append(text)
+        return ",".join(parts)
+    if value is None:
+        return ""
+    return _stringify(value)
+
+
 def build_row(path: Path, header: Dict[str, Any], summary: Dict[str, Any]) -> Dict[str, str]:
+    meta = _load_meta(path)
+
     exp_id = _stringify(header.get("exp_id"))
+    if meta and meta.get("exp_id"):
+        exp_id = _stringify(meta.get("exp_id"))
+
     exp = _stringify(header.get("exp"))
     config = _stringify(header.get("config"))
     cfg_hash_value = _stringify(header.get("cfg_hash"))
+
     mode = _stringify(header.get("mode"))
+    if meta and meta.get("mode"):
+        mode = _stringify(meta.get("mode"))
+
     git_commit = _stringify(header.get("git_commit"))
+    if not git_commit and meta and meta.get("git_commit"):
+        git_commit = _stringify(meta.get("git_commit"))
+    elif not git_commit and meta and meta.get("git_sha"):
+        git_commit = _stringify(meta.get("git_sha"))
+
     run_at = _stringify(header.get("run_at"))
+    if meta and meta.get("timestamp"):
+        run_at = _stringify(meta.get("timestamp"))
+
     seeds = _collect_seeds(header)
+    if meta and meta.get("seeds") is not None:
+        seeds = _stringify_seeds(meta.get("seeds"))
 
     trials = _normalise_int(summary.get("trials"))
+    if meta and meta.get("trials") is not None:
+        try:
+            trials = int(meta.get("trials"))
+        except (TypeError, ValueError):
+            pass
     successes = _normalise_int(summary.get("successes"))
     if trials > 0 and successes > trials:
         successes = trials

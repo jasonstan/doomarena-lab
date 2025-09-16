@@ -58,7 +58,7 @@ This repo currently uses thin adapters to mirror DoomArena concepts:
 
 ### Results schema
 
-Each run writes `results/<exp>/meta.json` with execution metadata. `results/summary.csv` includes these fields and is locked to the following header (order matters):
+Each run writes execution metadata next to its JSONL log (for example `results/<exp>/<exp>_seed42.meta.json`). `results/summary.csv` includes these fields and is locked to the following header (order matters):
 
 ```
 exp_id,exp,config,cfg_hash,mode,seeds,trials,successes,asr,git_commit,run_at

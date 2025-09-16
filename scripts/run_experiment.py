@@ -245,6 +245,7 @@ def main() -> None:
         seeds=seeds_list,
         trials=trials_count,
         mode=actual_mode,
+        meta_path=jsonl_path.with_suffix(".meta.json"),
     )
 
     print(f"ASR={asr:.6f}")

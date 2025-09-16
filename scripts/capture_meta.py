@@ -103,12 +103,19 @@ def write_meta(
     seeds: Iterable[object],
     trials: int,
     mode: str,
+    meta_path: Path | str | None = None,
 ) -> dict[str, object]:
     target_dir = Path(exp_dir)
     target_dir.mkdir(parents=True, exist_ok=True)
     metadata = gather_metadata(exp_id=exp_id, seeds=seeds, trials=trials, mode=mode)
-    meta_path = target_dir / "meta.json"
-    meta_path.write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    if meta_path is not None:
+        meta_file = Path(meta_path)
+        if not meta_file.is_absolute():
+            meta_file = target_dir / meta_file
+    else:
+        meta_file = target_dir / "meta.json"
+    meta_file.parent.mkdir(parents=True, exist_ok=True)
+    meta_file.write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return metadata
 
 
@@ -144,6 +151,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=None,
         help="Optional explicit output directory. Overrides --results-root/--exp-dir when provided.",
     )
+    parser.add_argument(
+        "--jsonl",
+        default=None,
+        help=(
+            "Optional JSONL file for the run. When provided, metadata is written next to it "
+            "with a '.meta.json' suffix."
+        ),
+    )
     args = parser.parse_args(argv)
 
     if args.output:
@@ -151,14 +166,25 @@ def main(argv: Sequence[str] | None = None) -> int:
     else:
         exp_dir = Path(args.results_root) / args.exp_dir
 
+    meta_target: Path | None = None
+    if args.jsonl:
+        jsonl_path = Path(args.jsonl)
+        if not jsonl_path.is_absolute():
+            jsonl_path = exp_dir / jsonl_path
+        meta_target = jsonl_path.with_suffix(".meta.json")
+
     metadata = write_meta(
         exp_dir,
         exp_id=args.exp_id,
         seeds=_parse_seeds_argument(args.seeds),
         trials=args.trials,
         mode=args.mode,
+        meta_path=meta_target,
     )
-    meta_path = Path(exp_dir) / "meta.json"
+    if meta_target is None:
+        meta_path = Path(exp_dir) / "meta.json"
+    else:
+        meta_path = meta_target
     print(meta_path.as_posix())
     print(json.dumps(metadata, indent=2, sort_keys=True))
     return 0
