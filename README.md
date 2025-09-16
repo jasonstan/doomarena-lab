@@ -1,3 +1,5 @@
+[![Smoke](https://github.com/jasonstan/doomarena-quickstart/actions/workflows/smoke.yml/badge.svg)](https://github.com/jasonstan/doomarena-quickstart/actions/workflows/smoke.yml)
+
 # TAUBENCH Airline Scaffold
 
 This repository is a scaffold for the TAUBench Airline example in DoomArena.
@@ -43,6 +45,8 @@ This repo currently uses thin adapters to mirror DoomArena concepts:
 
 ## Results
 <!-- RESULTS:BEGIN -->
+
+**Results & artifacts:** The CI smoke run (SHIM sweep) uploads `results/summary.csv` and `results/summary.png` as build artifacts on every PR. See the latest runs on the **Actions** tab.
 
 ![Results summary](results/summary.svg)
 
