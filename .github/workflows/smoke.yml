@@ -1,27 +1,23 @@
 name: smoke
 
 on:
-  push:
-    branches: [ main ]
-    paths-ignore:
-      - 'README.md'
-      - 'docs/**'
   pull_request:
     branches: [ main ]
-    paths-ignore:
-      - 'README.md'
-      - 'docs/**'
+  push:
+    branches: [ main ]
   workflow_dispatch:
 
-concurrency:
-  group: smoke-${{ github.ref }}
-  cancel-in-progress: true
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
 
 jobs:
   shim:
     name: SHIM sweep
     runs-on: ubuntu-latest
     timeout-minutes: 15
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,27 +25,17 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
           python-version: "3.11"
+          # NOTE: no pip cache here (avoids “no requirements/pyproject found” error)
 
-
-      - name: Install dependencies
-        run: |
-          python -m venv .venv
-          . .venv/bin/activate
-          python -m pip install -U pip wheel
-          pip install -U doomarena doomarena-taubench pytest pyyaml matplotlib
-
-      - name: Run SHIM sweep
+      - name: Bootstrap & run SHIM sweep via Makefile
         env:
           EXP: airline_escalating_v1
-          TRIALS: '5'
-          SEEDS: '41,42,43'
+          TRIALS: "5"
+          SEEDS: "41,42,43"
           MODE: SHIM
         run: |
-          . .venv/bin/activate
+          make install
           make xsweep EXP="$EXP" TRIALS="$TRIALS" SEEDS="$SEEDS" MODE="$MODE"
           make report
 
@@ -62,4 +48,4 @@ jobs:
             results/**
             results/summary.csv
             results/summary.png
-          if-no-files-found: warn
+          if-no-files-found: ignore
