@@ -1,4 +1,4 @@
-.PHONY: venv install test run sweep aggregate report scaffold check-schema plot sweep3 real1 xrun xsweep xsweep-all topn demo
+.PHONY: venv install test run sweep aggregate report scaffold check-schema plot notes sweep3 real1 xrun xsweep xsweep-all topn demo
 
 VENV := .venv
 PY   := $(VENV)/bin/python
@@ -131,8 +131,15 @@ plot:
 		python scripts/plot_results.py --exp $(EXP); \
 	fi
 
-report: aggregate plot
-		if [ -x "$(PY)" ]; then \
+notes:
+	if [ -x "$(PY)" ]; then \
+		"$(PY)" scripts/auto_notes.py; \
+	else \
+		python scripts/auto_notes.py; \
+	fi
+
+report: aggregate plot notes
+	if [ -x "$(PY)" ]; then \
 		"$(PY)" scripts/update_readme_results.py; \
 		"$(PY)" scripts/update_readme_topn.py; \
 	else \

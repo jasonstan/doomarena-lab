@@ -65,3 +65,5 @@ jobs:
             results/**
             results/summary.csv
             results/summary.png
+            results/summary.svg
+            results/summary.md
