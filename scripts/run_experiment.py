@@ -33,17 +33,9 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run a single experiment seed")
     parser.add_argument("--config", required=True, help="Path to experiment YAML config")
     parser.add_argument("--seed", type=int, help="Seed override", default=None)
-    parser.add_argument(
-        "--mode",
-        help="Override config mode (e.g. SHIM or REAL)",
-        default=None,
-    )
-    parser.add_argument(
-        "--trials",
-        type=int,
-        help="Override config trials count",
-        default=None,
-    )
+    parser.add_argument("--mode", help="Override config mode (e.g. SHIM or REAL)", default=None)
+    parser.add_argument("--trials", type=int, help="Override config trials count", default=None)
+    parser.add_argument("--exp", help="Override config experiment name", default=None)
     return parser.parse_args()
 
 
@@ -164,7 +156,9 @@ def main() -> None:
     if args.mode is not None:
         cfg["mode"] = args.mode
     if args.trials is not None:
-        cfg["trials"] = args.trials
+        cfg["trials"] = int(args.trials)
+    if args.exp is not None:
+        cfg["exp"] = args.exp
 
     exp = cfg.get("exp")
     if not exp:
@@ -183,8 +177,8 @@ def main() -> None:
     mode = str(cfg.get("mode", "SHIM")).upper()
     trials = int(cfg.get("trials", 0))
 
-    results_dir = Path("results") / f"{exp}_{exp_id}"
-    jsonl_path = results_dir / f"seed{seed}.jsonl"
+    results_dir = Path("results") / str(exp)
+    jsonl_path = results_dir / f"{exp}_seed{seed}.jsonl"
 
     jsonl_path.parent.mkdir(parents=True, exist_ok=True)
     if jsonl_path.exists():
