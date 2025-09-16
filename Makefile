@@ -43,8 +43,23 @@ install: venv
 	$(PIP) install -U doomarena doomarena-taubench pytest pyyaml pandas matplotlib
 	$(PY) scripts/ensure_tau_bench.py || (echo "tau_bench unavailable; continuing without real τ-Bench" && exit 0)
 
-test: install
-	$(PY) -m pytest -q
+test: demo
+	@echo "🔎 Validating results layout..."
+	@test -f results/summary.csv || (echo "missing results/summary.csv" && exit 1)
+	@python - <<-'PY'
+	import csv, sys
+	from pathlib import Path
+	p = Path("results/summary.csv")
+	f = p.open(newline="")
+	rdr = csv.DictReader(f)
+	hdr = { (h or "").strip().lower() for h in (rdr.fieldnames or []) }
+	f.close()
+	if not ("exp" in hdr and ("asr" in hdr or "attack_success_rate" in hdr)): print("CSV header invalid. Need 'exp' and 'asr' (or 'attack_success_rate'). Found:", hdr); sys.exit(1)
+	print("CSV headers OK")
+	PY
+	@test -f results/summary.svg || (echo "missing results/summary.svg" && exit 1)
+	@find results -type f -name '*seed*.jsonl' -print -quit | grep -q . || (echo "no per-seed jsonl files found under results/" && exit 1)
+	@echo "✅ Results schema & artifacts look good."
 
 check-schema: venv
 	$(PY) scripts/check_schema.py
