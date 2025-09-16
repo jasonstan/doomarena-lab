@@ -8,7 +8,7 @@ This repository is a scaffold for the TAUBench Airline example in DoomArena.
 - Use `make scaffold` once to create folders.
 - Edit config at `configs/airline_escalating_v1/run.yaml`.
 - Run offline: `make install && make run`
-- Tests: `make test`
+- Tests: `make test` (runs demo + results validation)
 - Schema check: `make check-schema`
 - Results (JSONL) will be written under `results/`.
 
@@ -23,6 +23,14 @@ make plot
 # try REAL (requires permissions), otherwise falls back:
 make real1
 ```
+
+## Testing
+
+`make test` runs `make demo` to regenerate sample results, then validates the artifacts:
+
+- `results/summary.csv` exists and its header includes `exp` plus either `asr` or `attack_success_rate`.
+- `results/summary.svg` exists as the aggregate plot.
+- At least one per-seed `*seed*.jsonl` file is present under `results/`.
 
 ### Quick Demo (compare two experiments)
 
