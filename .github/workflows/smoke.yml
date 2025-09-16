@@ -3,79 +3,36 @@ name: smoke
 on:
   pull_request:
     branches: [ main ]
+  push:
+    branches: [ main ]
   workflow_dispatch:
 
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
 jobs:
-  smoke:
+  shim:
+    name: SHIM sweep
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-      issues: write
-      pull-requests: write
-    env:
-      # Headless plotting for matplotlib
-      MPLBACKEND: Agg
-      # Makefile overrides we want for a quick SHIM sweep
-      EXP: airline_escalating_v1
-      MODE: SHIM
-      SEEDS: '41,42,43'
-      TRIALS: '5'
+    timeout-minutes: 15
+
     steps:
-      - name: Add approval-friendly label
-        # Forked pull requests receive a read-only token, so skip labeling there.
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const label = 'ci: smoke';
-            const { owner, repo } = context.repo;
-            const issue_number = context.payload.pull_request.number;
-
-            async function ensureLabelExists() {
-              try {
-                await github.rest.issues.getLabel({ owner, repo, name: label });
-              } catch (error) {
-                if (error.status === 404) {
-                  await github.rest.issues.createLabel({
-                    owner,
-                    repo,
-                    name: label,
-                    color: '0E8A16',
-                    description: 'Indicates that the smoke workflow ran for approval readiness.',
-                  });
-                } else {
-                  throw error;
-                }
-              }
-            }
-
-            await ensureLabelExists();
-            await github.rest.issues.addLabels({
-              owner,
-              repo,
-              issue_number,
-              labels: [label],
-            });
-
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
           python-version: "3.11"
-
+          # NOTE: no pip cache here (avoids “no requirements/pyproject found” error)
 
       - name: Bootstrap & run SHIM sweep via Makefile
         env:
           EXP: airline_escalating_v1
-          TRIALS: '5'
-          SEEDS: '41,42,43'
+          TRIALS: "5"
+          SEEDS: "41,42,43"
           MODE: SHIM
         run: |
           make install
@@ -91,4 +48,4 @@ jobs:
             results/**
             results/summary.csv
             results/summary.png
-          if-no-files-found: warn
+          if-no-files-found: ignore
