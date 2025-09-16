@@ -103,6 +103,9 @@ def weighted_asr_by_exp(rows: Iterable[SummaryRow]) -> Dict[str, float]:
         if trials is None:
             continue
 
+        if row.successes is None and row.asr is None:
+            continue
+
         totals_trials[exp] += float(trials)
 
         if row.successes is not None:
