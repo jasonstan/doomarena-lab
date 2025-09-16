@@ -3,8 +3,12 @@ name: smoke
 on:
   pull_request:
     branches: [ main ]
-  push:
-    branches: [ main ]
+    paths:
+      - '**/*.py'
+      - 'Makefile'
+      - 'scripts/**'
+      - 'configs/**'
+      - '.github/workflows/smoke.yml'
   workflow_dispatch:
 
 permissions:
@@ -13,7 +17,7 @@ permissions:
   pull-requests: write
 
 jobs:
-  shim:
+  smoke:
     name: SHIM sweep
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -25,14 +29,23 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-          # NOTE: no pip cache here (avoids “no requirements/pyproject found” error)
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: |
+            requirements-ci.txt
+            **/requirements.txt
+            **/pyproject.toml
+
+      - name: Install deps (for smoke)
+        run: |
+          python -m pip install -U pip
+          if [ -f requirements-ci.txt ]; then pip install -r requirements-ci.txt; fi
 
       - name: Bootstrap & run SHIM sweep via Makefile
         env:
           EXP: airline_escalating_v1
-          TRIALS: "5"
-          SEEDS: "41,42,43"
+          TRIALS: '5'
+          SEEDS: '41,42,43'
           MODE: SHIM
         run: |
           make install
@@ -48,4 +61,3 @@ jobs:
             results/**
             results/summary.csv
             results/summary.png
-          if-no-files-found: ignore
