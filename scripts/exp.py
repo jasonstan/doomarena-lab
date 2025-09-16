@@ -12,6 +12,25 @@ SUMMARY_COLUMNS: Sequence[str] = (
     "timestamp",
     "run_id",
     "git_sha",
+    "git_branch",
+    "repo_dirty",
+    "exp",
+    "exp_id",
+    "seed",
+    "mode",
+    "trials",
+    "successes",
+    "asr",
+    "python_version",
+    "packages",
+    "seeds",
+    "path",
+)
+
+LEGACY_SUMMARY_COLUMNS: Sequence[str] = (
+    "timestamp",
+    "run_id",
+    "git_sha",
     "repo_dirty",
     "exp",
     "seed",
@@ -76,14 +95,31 @@ def _seed_key(value: str) -> int | str:
     return value
 
 
+def _normalize_summary_row(row: Dict[str, str]) -> Dict[str, str]:
+    normalized = {column: "" for column in SUMMARY_COLUMNS}
+    for key, value in row.items():
+        if key in normalized and value is not None:
+            normalized[key] = value
+    if not normalized.get("python_version") and row.get("py_version"):
+        normalized["python_version"] = row["py_version"]
+    return normalized
+
+
 def read_summary(summary_path: Path) -> List[Dict[str, str]]:
     if not summary_path.exists():
         return []
     with summary_path.open("r", encoding="utf-8", newline="") as handle:
         reader = csv.DictReader(handle)
-        if reader.fieldnames != list(SUMMARY_COLUMNS):
+        if reader.fieldnames is None:
             return []
-        return [dict(row) for row in reader]
+        recognized = reader.fieldnames in (list(SUMMARY_COLUMNS), list(LEGACY_SUMMARY_COLUMNS))
+        rows: List[Dict[str, str]] = []
+        for raw in reader:
+            row = dict(raw)
+            if not recognized and not row.get("exp"):
+                continue
+            rows.append(_normalize_summary_row(row))
+        return rows
 
 
 def upsert_summary_row(rows: List[Dict[str, str]], row: Dict[str, str]) -> List[Dict[str, str]]:

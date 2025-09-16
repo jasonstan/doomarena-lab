@@ -6,22 +6,9 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
-SUMMARY_COLUMNS = [
-    "timestamp",
-    "run_id",
-    "git_sha",
-    "repo_dirty",
-    "exp",
-    "seed",
-    "mode",
-    "trials",
-    "successes",
-    "asr",
-    "py_version",
-    "path",
-]
+from exp import SUMMARY_COLUMNS, read_summary as load_summary_rows
 
 SEED_PATTERN = re.compile(r"_seed(?P<seed>\d+)\.jsonl$")
 
@@ -114,27 +101,33 @@ def normalize_mode(mode: Optional[str]) -> str:
     return value
 
 
+def load_meta(jsonl_path: Path) -> Optional[Dict[str, Any]]:
+    meta_path = jsonl_path.parent / "meta.json"
+    if not meta_path.exists():
+        return None
+    try:
+        with meta_path.open("r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    return data
+
+
 def read_existing(summary_path: Path) -> Dict[Tuple[str, str], Dict[str, str]]:
     rows: Dict[Tuple[str, str], Dict[str, str]] = {}
-    if not summary_path.exists():
-        return rows
-    with summary_path.open("r", encoding="utf-8", newline="") as handle:
-        reader = csv.DictReader(handle)
-        if reader.fieldnames is None:
-            return rows
-        if reader.fieldnames != SUMMARY_COLUMNS:
-            return rows
-        for row in reader:
-            exp = row.get("exp", "")
-            seed = row.get("seed", "")
-            if exp:
-                rows[(exp, seed)] = dict(row)
+    for row in load_summary_rows(summary_path):
+        exp = row.get("exp", "")
+        seed = row.get("seed", "")
+        if exp:
+            rows[(exp, seed)] = dict(row)
     return rows
 
 
 def build_rows(base_dir: Path, existing: Dict[Tuple[str, str], Dict[str, str]]) -> List[Dict[str, str]]:
     commit = get_current_commit()
-    py_version = platform.python_version()
+    default_python_version = platform.python_version()
     now_iso = datetime.now(timezone.utc).isoformat()
     run_id = generate_run_id()
     repo_dirty = repo_is_dirty()
@@ -148,25 +141,84 @@ def build_rows(base_dir: Path, existing: Dict[Tuple[str, str], Dict[str, str]]) 
         trials, successes, asr, mode_hint = parse_jsonl(path)
         asr = max(0.0, min(1.0, asr))
         row = dict(rows.get(key, {}))
+        meta = load_meta(path)
+
         timestamp = row.get("timestamp") or now_iso
-        mode = normalize_mode(mode_hint or row.get("mode"))
+        if meta and meta.get("timestamp"):
+            timestamp = str(meta.get("timestamp"))
+
+        git_sha_value = row.get("git_sha") or commit
+        if meta and meta.get("git_sha"):
+            git_sha_value = str(meta.get("git_sha"))
+
+        git_branch_value = row.get("git_branch", "")
+        if meta and meta.get("git_branch"):
+            git_branch_value = str(meta.get("git_branch"))
+
+        repo_dirty_value = row.get("repo_dirty") or ("true" if repo_dirty else "false")
+
+        exp_id_value = row.get("exp_id", "")
+        if meta and meta.get("exp_id"):
+            exp_id_value = str(meta.get("exp_id"))
+
+        if meta and meta.get("mode"):
+            mode = normalize_mode(str(meta.get("mode")))
+        else:
+            mode = normalize_mode(mode_hint or row.get("mode"))
+
+        trials_value: Optional[str] = row.get("trials")
+        if meta and meta.get("trials") is not None:
+            meta_trials = meta.get("trials")
+            try:
+                trials_value = str(int(meta_trials))
+            except (TypeError, ValueError):
+                trials_value = str(meta_trials)
+        if not trials_value:
+            trials_value = str(trials)
+
+        python_version_value = row.get("python_version", "")
+        if meta and meta.get("python_version"):
+            python_version_value = str(meta.get("python_version"))
+        elif not python_version_value:
+            python_version_value = default_python_version
+
+        packages_value = row.get("packages", "")
+        if meta and meta.get("packages") is not None:
+            packages_meta = meta.get("packages")
+            if isinstance(packages_meta, dict):
+                packages_value = json.dumps(packages_meta, sort_keys=True)
+            else:
+                packages_value = str(packages_meta)
+
+        seeds_value = row.get("seeds", "")
+        if meta and meta.get("seeds") is not None:
+            seeds_meta = meta.get("seeds")
+            if isinstance(seeds_meta, (list, tuple)):
+                seeds_value = ",".join(str(item) for item in seeds_meta)
+            else:
+                seeds_value = str(seeds_meta)
+
         row.update(
             {
                 "timestamp": timestamp,
                 "run_id": row.get("run_id") or run_id,
-                "git_sha": commit,
-                "repo_dirty": row.get("repo_dirty") or ("true" if repo_dirty else "false"),
+                "git_sha": git_sha_value,
+                "git_branch": git_branch_value,
+                "repo_dirty": repo_dirty_value,
                 "exp": exp,
+                "exp_id": exp_id_value,
                 "seed": seed,
                 "mode": mode,
-                "trials": str(trials),
+                "trials": str(trials_value),
                 "successes": str(successes),
                 "asr": f"{asr:.6f}",
-                "py_version": row.get("py_version") or py_version,
+                "python_version": python_version_value,
+                "packages": packages_value,
+                "seeds": seeds_value,
                 "path": path.as_posix(),
             }
         )
-        rows[key] = row
+        rows[key] = {column: row.get(column, "") for column in SUMMARY_COLUMNS}
         seen_keys.add(key)
 
     normalized_rows: List[Dict[str, str]] = []

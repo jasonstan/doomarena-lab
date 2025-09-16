@@ -9,9 +9,12 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Iterable
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.append(str(SCRIPT_DIR))
 
 from adapters.attacks import EscalatingDialogueAttackAdapter
 from adapters.filters import OutOfPolicyRefundFilter
@@ -25,6 +28,8 @@ from exp import (
     write_summary,
 )
 from taubench_airline_da import offline_amount_for_trial
+
+from capture_meta import write_meta
 
 SUMMARY_PATH = Path("results") / "summary.csv"
 
@@ -236,19 +241,52 @@ def main() -> None:
     run_id = generate_run_id()
     dirty = repo_is_dirty()
 
+    seeds_config: Iterable[Any] | None = cfg.get("seeds")
+    if isinstance(seeds_config, Iterable) and not isinstance(seeds_config, (str, bytes)):
+        meta_seeds = list(seeds_config)
+    elif seeds_config is None:
+        meta_seeds = [seed]
+    else:
+        meta_seeds = [seeds_config]
+    meta_seeds.append(seed)
+
+    meta = write_meta(
+        results_dir,
+        exp_id=exp_id,
+        seeds=meta_seeds,
+        trials=trials_count,
+        mode=actual_mode,
+    )
+
+    packages_value = meta.get("packages", {})
+    if isinstance(packages_value, dict):
+        packages_str = json.dumps(packages_value, sort_keys=True)
+    else:
+        packages_str = str(packages_value)
+    seeds_str = ""
+    seeds_meta = meta.get("seeds", [])
+    if isinstance(seeds_meta, Iterable) and not isinstance(seeds_meta, (str, bytes)):
+        seeds_str = ",".join(str(item) for item in seeds_meta)
+    elif isinstance(seeds_meta, (str, bytes)):
+        seeds_str = str(seeds_meta)
+
     rows = read_summary(SUMMARY_PATH)
     row = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": str(meta.get("timestamp", datetime.now(timezone.utc).isoformat())),
         "run_id": run_id,
-        "git_sha": commit,
+        "git_sha": str(meta.get("git_sha", commit)),
+        "git_branch": str(meta.get("git_branch", "")),
         "repo_dirty": "true" if dirty else "false",
         "exp": str(exp),
+        "exp_id": str(meta.get("exp_id", exp_id)),
         "seed": str(seed),
-        "mode": actual_mode,
-        "trials": str(trials_count),
+        "mode": str(meta.get("mode", actual_mode)),
+        "trials": str(meta.get("trials", trials_count)),
         "successes": str(successes),
         "asr": f"{asr:.6f}",
-        "py_version": platform.python_version(),
+        "python_version": str(meta.get("python_version", platform.python_version())),
+        "packages": packages_str,
+        "seeds": seeds_str,
         "path": jsonl_path.as_posix(),
     }
     upsert_summary_row(rows, row)
