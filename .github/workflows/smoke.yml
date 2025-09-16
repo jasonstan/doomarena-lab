@@ -45,16 +45,20 @@ jobs:
           python -m pip install -U pip
           if [ -f requirements-ci.txt ]; then pip install -r requirements-ci.txt; fi
 
+      - name: Select run id
+        run: echo "RUN_ID=$(date -u +'%Y%m%d-%H%M%S')" >> $GITHUB_ENV
+
       - name: Bootstrap & run SHIM sweep via Makefile
         env:
           EXP: airline_escalating_v1
           TRIALS: '5'
           SEEDS: '41,42,43'
           MODE: SHIM
+          RUN_ID: ${{ env.RUN_ID }}
         run: |
           make install
-          make xsweep EXP="$EXP" TRIALS="$TRIALS" SEEDS="$SEEDS" MODE="$MODE"
-          make report
+          make xsweep EXP="$EXP" TRIALS="$TRIALS" SEEDS="$SEEDS" MODE="$MODE" RUN_ID="$RUN_ID"
+          make report RUN_ID="$RUN_ID"
 
       - name: Upload results
         if: always()
@@ -62,8 +66,7 @@ jobs:
         with:
           name: results
           path: |
-            results/**
+            results/${{ env.RUN_ID }}/**
             results/summary.csv
-            results/summary.png
             results/summary.svg
             results/summary.md

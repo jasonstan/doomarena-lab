@@ -14,6 +14,7 @@ def main():
     p.add_argument("--trials", type=int, default=int(os.getenv("TRIALS", "5")))
     p.add_argument("--mode", default=os.getenv("MODE", "SHIM"))
     p.add_argument("--exp", default=None, help="limit to a single exp name (dir name under configs/)")
+    p.add_argument("--outdir", default=os.getenv("RUN_DIR", "results"), help="Output directory for run artifacts")
     args = p.parse_args()
 
     cfgs = sorted(glob.glob(args.glob))
@@ -22,6 +23,9 @@ def main():
 
     xsweep = Path("scripts/xsweep.py")
     rc = 0
+    outdir = Path(args.outdir).expanduser()
+    outdir.mkdir(parents=True, exist_ok=True)
+
     for cfg in cfgs:
         exp = Path(cfg).parent.name
         if xsweep.exists():
@@ -32,6 +36,7 @@ def main():
                 "--trials", str(args.trials),
                 "--mode", args.mode,
                 "--exp", exp,
+                "--outdir", outdir.as_posix(),
             ]
             rc |= run(cmd)
         else:
@@ -44,6 +49,7 @@ def main():
                     "--trials", str(args.trials),
                     "--mode", args.mode,
                     "--exp", exp,
+                    "--outdir", outdir.as_posix(),
                 ]
                 rc |= run(cmd)
     sys.exit(rc)

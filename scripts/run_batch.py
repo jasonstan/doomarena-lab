@@ -256,8 +256,9 @@ def main() -> None:
     except ValueError as exc:
         raise SystemExit(str(exc)) from exc
 
-    outdir = Path(args.outdir)
-    summary_path = Path("results") / "summary.csv"
+    outdir = Path(args.outdir).expanduser()
+    outdir.mkdir(parents=True, exist_ok=True)
+    summary_path = outdir / "summary.csv"
     existing_rows = read_existing_summary(summary_path)
     commit = git_sha()
     run_id = generate_run_id()

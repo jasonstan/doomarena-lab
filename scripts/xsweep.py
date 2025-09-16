@@ -39,6 +39,11 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Experiment name override passed to run_experiment.py",
     )
+    parser.add_argument(
+        "--outdir",
+        default="results",
+        help="Directory where per-seed outputs should be written",
+    )
     return parser.parse_args()
 
 
@@ -85,6 +90,9 @@ def main() -> int:
         print("xsweep: no seeds in config; nothing to run")
         return 0
 
+    outdir = Path(args.outdir).expanduser()
+    outdir.mkdir(parents=True, exist_ok=True)
+
     rc = 0
     for seed in seeds:
         cmd = [
@@ -95,6 +103,7 @@ def main() -> int:
             "--seed",
             str(seed),
         ]
+        cmd.extend(["--outdir", outdir.as_posix()])
         if args.trials is not None:
             cmd.extend(["--trials", str(int(args.trials))])
         if args.mode:

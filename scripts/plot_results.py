@@ -14,11 +14,6 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional
 
-CSV = pathlib.Path("results/summary.csv")
-OUT_SVG = pathlib.Path("results/summary.svg")
-OUT_PNG = pathlib.Path("results/summary.png")
-
-
 @dataclass
 class SummaryRow:
     exp: str
@@ -119,11 +114,16 @@ def weighted_asr_by_exp(rows: Iterable[SummaryRow]) -> Dict[str, float]:
     }
 
 
-def plot_summary(experiments: List[str], means: List[float]) -> None:
+def plot_summary(
+    experiments: List[str],
+    means: List[float],
+    svg_path: pathlib.Path,
+    png_path: pathlib.Path,
+) -> None:
     """Render the summary plot and write SVG + PNG outputs."""
 
     if not experiments:
-        raise SystemExit("No usable rows in results/summary.csv")
+        raise SystemExit("No usable rows in summary data")
 
     fig_width = 6 + 0.5 * max(len(experiments) - 1, 0)
     fig, ax = plt.subplots(figsize=(fig_width, 4))
@@ -156,11 +156,11 @@ def plot_summary(experiments: List[str], means: List[float]) -> None:
     ax.grid(axis="y", linestyle="--", alpha=0.4)
 
     fig.tight_layout()
-    OUT_SVG.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(OUT_SVG, bbox_inches="tight")
-    fig.savefig(OUT_PNG, bbox_inches="tight")
+    svg_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(svg_path, bbox_inches="tight")
+    fig.savefig(png_path, bbox_inches="tight")
     plt.close(fig)
-    print(f"Wrote {OUT_SVG} and {OUT_PNG}")
+    print(f"Wrote {svg_path} and {png_path}")
 
 
 def parse_args(argv: Optional[List[str]]) -> argparse.Namespace:
@@ -169,23 +169,33 @@ def parse_args(argv: Optional[List[str]]) -> argparse.Namespace:
         "--exp",
         help="Unused; maintained for backwards compatibility with older Makefile targets.",
     )
+    parser.add_argument(
+        "--outdir",
+        default="results",
+        help="Directory containing summary.csv and where plots should be written",
+    )
     return parser.parse_args(argv)
 
 
 def main(argv: Optional[List[str]] = None) -> int:
-    parse_args(argv)
+    args = parse_args(argv)
 
-    if not CSV.exists():
-        raise SystemExit("results/summary.csv not found; run `make report` first")
+    base_dir = pathlib.Path(args.outdir).expanduser()
+    csv_path = base_dir / "summary.csv"
+    svg_path = base_dir / "summary.svg"
+    png_path = base_dir / "summary.png"
 
-    rows = load_rows(CSV)
+    if not csv_path.exists():
+        raise SystemExit(f"{csv_path} not found; run `make report` first")
+
+    rows = load_rows(csv_path)
     aggregates = weighted_asr_by_exp(rows)
     if not aggregates:
-        raise SystemExit("No usable rows in results/summary.csv")
+        raise SystemExit("No usable rows in summary data")
 
     experiments = sorted(aggregates.keys())
     means = [aggregates[exp] for exp in experiments]
-    plot_summary(experiments, means)
+    plot_summary(experiments, means, svg_path, png_path)
     return 0
 
 

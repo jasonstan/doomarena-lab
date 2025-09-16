@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import argparse
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Tuple
 
@@ -262,8 +263,19 @@ def write_summary_md(base_dir: Path, rows: List[Dict[str, str]]) -> None:
     md_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Aggregate DoomArena run outputs")
+    parser.add_argument(
+        "--outdir",
+        default="results",
+        help="Directory to scan for jsonl files and write summaries",
+    )
+    return parser.parse_args()
+
+
 def main() -> None:
-    base_dir = Path("results")
+    args = parse_args()
+    base_dir = Path(args.outdir).expanduser()
     base_dir.mkdir(parents=True, exist_ok=True)
     summary_path = base_dir / "summary.csv"
 

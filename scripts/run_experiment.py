@@ -30,6 +30,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--mode", help="Override config mode (e.g. SHIM or REAL)", default=None)
     parser.add_argument("--trials", type=int, help="Override config trials count", default=None)
     parser.add_argument("--exp", help="Override config experiment name", default=None)
+    parser.add_argument(
+        "--outdir",
+        default="results",
+        help="Directory where experiment artifacts should be written",
+    )
     return parser.parse_args()
 def _prepare_attack(cfg: Dict[str, Any]) -> tuple[EscalatingDialogueAttackAdapter, int]:
     suffixes = cfg.get("suffixes") or []
@@ -136,7 +141,8 @@ def main() -> None:
     mode = str(cfg.get("mode", "SHIM")).upper()
     trials = int(cfg.get("trials", 0))
 
-    results_dir = Path("results") / str(exp)
+    outdir = Path(args.outdir).expanduser()
+    results_dir = outdir / str(exp)
     jsonl_path = results_dir / f"{exp}_seed{seed}.jsonl"
 
     jsonl_path.parent.mkdir(parents=True, exist_ok=True)
