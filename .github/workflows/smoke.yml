@@ -1,0 +1,29 @@
+name: Shim smoke
+on:
+  pull_request:
+  push:
+    branches: ["**"]
+    tags-ignore: ["**"]
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install deps
+        run: |
+          python -m pip install -U pip
+          pip install -U doomarena doomarena-taubench pytest pyyaml matplotlib
+      - name: Run shim smoke
+        run: make ci
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: doomarena-smoke
+          path: |
+            results/summary.csv
+            results/summary.svg
+            results/**/*.jsonl
+          if-no-files-found: warn

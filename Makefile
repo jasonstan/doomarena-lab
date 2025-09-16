@@ -118,3 +118,7 @@ journal: install
 .PHONY: install-tau
 install-tau: install
 	$(PY) scripts/ensure_tau_bench.py || (echo "tau_bench unavailable; continuing without real τ-Bench" && exit 0)
+
+.PHONY: ci
+ci:
+	SEEDS_OVERRIDE=41,42 TRIALS_OVERRIDE=3 MODE_OVERRIDE=SHIM $(MAKE) report
