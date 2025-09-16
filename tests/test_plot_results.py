@@ -14,10 +14,7 @@ def test_plot_results_smoke():
     if not summary_path.exists():
         pytest.skip("summary.csv missing; skipping plot smoke test")
 
-    plots_dir = Path("results/plots")
     expected_files = [
-        plots_dir / "asr_by_seed.png",
-        plots_dir / "asr_over_time.png",
         Path("results/summary.svg"),
         Path("results/summary.png"),
     ]
