@@ -6,7 +6,6 @@ __pycache__/
 results/*
 !results/.gitkeep
 !results/summary.csv
-!results/summary.md
 !results/summary.svg
 artifacts/
 .cache/

@@ -1,252 +1,129 @@
 #!/usr/bin/env python3
-"""Generate quick plots from results/summary.csv."""
-from __future__ import annotations
-
-import argparse
-import csv
-import sys
-from collections import defaultdict
-from dataclasses import dataclass
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+"""Generate aggregated ASR plots from ``results/summary.csv``."""
 
 import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import csv, pathlib, statistics
+from collections import defaultdict
+import argparse
+import sys
+from typing import Dict, List, Optional, Tuple
 
-SUMMARY_CSV = Path("results/summary.csv")
-PLOTS_DIR = Path("results/plots")
-ASR_BY_SEED_PATH = PLOTS_DIR / "asr_by_seed.png"
-ASR_OVER_TIME_PATH = PLOTS_DIR / "asr_over_time.png"
-SUMMARY_SVG_PATH = Path("results/summary.svg")
-SUMMARY_PNG_PATH = Path("results/summary.png")
-
-
-@dataclass
-class SummaryRow:
-    """Typed representation of a single summary.csv row."""
-
-    run_at: datetime
-    exp: str
-    seed: str
-    asr: float
+CSV = pathlib.Path("results/summary.csv")
+OUT_SVG = pathlib.Path("results/summary.svg")
+OUT_PNG = pathlib.Path("results/summary.png")
 
 
-def parse_run_at(raw: str) -> Optional[datetime]:
-    """Parse an ISO timestamp, normalising to naive UTC datetimes."""
+def load_rows(csv_path: pathlib.Path) -> List[Tuple[str, float]]:
+    """Return ``(experiment, asr)`` rows from the CSV, normalising headers."""
 
-    if not raw:
-        return None
-
-    text = raw.strip()
-    if not text:
-        return None
-
-    if text.endswith("Z") or text.endswith("z"):
-        text = text[:-1] + "+00:00"
-
-    try:
-        dt = datetime.fromisoformat(text)
-    except ValueError:
-        return None
-    if dt.tzinfo is not None:
-        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
-    return dt
-
-
-def extract_seed(raw: Any) -> str:
-    """Extract a representative seed value from the CSV column."""
-
-    if raw is None:
-        return ""
-    text = str(raw)
-    parts = [part.strip() for part in text.split(",") if part.strip()]
-    if parts:
-        return parts[0]
-    return text.strip()
-
-
-def load_rows(path: Path) -> List[SummaryRow]:
-    """Load and validate rows from the summary CSV."""
-
-    if not path.exists():
-        print(f"No summary CSV found at {path}; nothing to plot.")
-        return []
-
-    with path.open(newline="") as csv_file:
-        reader = csv.DictReader(csv_file)
-        rows: List[SummaryRow] = []
+    rows: List[Tuple[str, float]] = []
+    with csv_path.open(newline="") as handle:
+        reader = csv.DictReader(handle)
+        if reader.fieldnames is None:
+            return rows
         for raw in reader:
-            run_at = parse_run_at(raw.get("run_at", ""))
-            if run_at is None:
-                exp_id = raw.get("exp_id", "<unknown>")
-                print(f"Skipping run {exp_id}: invalid timestamp '{raw.get('run_at')}'.")
+            if not raw:
                 continue
-            try:
-                asr = float(raw.get("asr", ""))
-            except (TypeError, ValueError):
-                exp_id = raw.get("exp_id", "<unknown>")
-                print(f"Skipping run {exp_id}: invalid ASR '{raw.get('asr')}'.")
-                continue
-            exp = raw.get("exp") or ""
-            seed = extract_seed(raw.get("seeds", ""))
-            rows.append(
-                SummaryRow(
-                    run_at=run_at,
-                    exp=exp,
-                    seed=seed,
-                    asr=asr,
-                )
-            )
+            normalised: Dict[str, object] = {}
+            for key, value in raw.items():
+                if key is None:
+                    continue
+                normalised[key.strip().lower()] = value
 
-    if not rows:
-        print(f"No rows found in {path}; nothing to plot.")
+            if "exp" not in normalised:
+                continue
+
+            asr_source: Optional[object]
+            if "asr" in normalised:
+                asr_source = normalised["asr"]
+            else:
+                asr_source = normalised.get("attack_success_rate")
+            if asr_source is None:
+                continue
+
+            try:
+                asr_value = float(asr_source)
+            except (TypeError, ValueError):
+                continue
+
+            exp_value = normalised.get("exp", "")
+            exp_text = str(exp_value).strip() if exp_value is not None else ""
+            if not exp_text:
+                exp_text = "<unknown>"
+            rows.append((exp_text, asr_value))
     return rows
 
 
-def latest_by_seed(rows: Iterable[SummaryRow]) -> Dict[str, SummaryRow]:
-    """Return the most recent row per seed."""
+def aggregate_means(rows: List[Tuple[str, float]]) -> Tuple[List[str], List[float]]:
+    """Aggregate mean ASR per experiment name."""
 
-    latest: Dict[str, SummaryRow] = {}
-    for row in rows:
-        existing = latest.get(row.seed)
-        if existing is None or row.run_at > existing.run_at:
-            latest[row.seed] = row
-    return latest
+    grouped: Dict[str, List[float]] = defaultdict(list)
+    for exp, asr in rows:
+        grouped[exp].append(asr)
 
-
-def sort_seed_items(items: Iterable[tuple[str, SummaryRow]]) -> List[tuple[str, SummaryRow]]:
-    """Sort seed-summary pairs numerically when possible."""
-
-    def sort_key(item: tuple[str, SummaryRow]):
-        seed, _ = item
-        try:
-            return (0, int(seed))
-        except (TypeError, ValueError):
-            return (1, seed)
-
-    return sorted(items, key=sort_key)
+    experiments = sorted(grouped.keys())
+    means = [statistics.fmean(grouped[exp]) for exp in experiments]
+    return experiments, means
 
 
-def plot_asr_by_seed(rows: Iterable[SummaryRow], exp: str) -> None:
-    latest_rows = sort_seed_items(latest_by_seed(rows).items())
-    if not latest_rows:
-        print(f"No seed data found for experiment '{exp}'; skipping ASR-by-seed plot.")
-        return
+def plot_summary(experiments: List[str], means: List[float]) -> None:
+    """Render the summary plot and write SVG + PNG outputs."""
 
-    seeds = [seed for seed, _ in latest_rows]
-    asrs = [row.asr for _, row in latest_rows]
+    if not experiments:
+        raise SystemExit("No usable rows in results/summary.csv")
 
-    fig, ax = plt.subplots(figsize=(6, 4))
-    ax.bar(seeds, asrs)
-    ax.set_ylim(0, 1)
-    ax.set_ylabel("Attack Success Rate")
-    ax.set_xlabel("Seed")
-    ax.set_title(f"ASR by seed – {exp}")
+    fig_width = 6 + 0.5 * max(len(experiments) - 1, 0)
+    fig, ax = plt.subplots(figsize=(fig_width, 4))
+    positions = range(len(experiments))
+    ax.bar(positions, means, width=0.6)
+
+    ax.set_ylim(0.0, 1.0)
+    ax.set_ylabel("ASR")
+    if len(experiments) == 1:
+        ax.set_title(f"Attack Success Rate — {experiments[0]}")
+    else:
+        ax.set_title("Attack Success Rate by Experiment")
+
+    ax.set_xticks(list(positions))
+    ax.set_xticklabels(
+        experiments,
+        rotation=20 if len(experiments) > 1 else 0,
+        ha="right" if len(experiments) > 1 else "center",
+    )
     ax.grid(axis="y", linestyle="--", alpha=0.4)
+
     fig.tight_layout()
-    PLOTS_DIR.mkdir(parents=True, exist_ok=True)
-    fig.savefig(ASR_BY_SEED_PATH, dpi=150)
+    OUT_SVG.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(OUT_SVG, bbox_inches="tight")
+    fig.savefig(OUT_PNG, bbox_inches="tight")
     plt.close(fig)
-    print(f"Wrote {ASR_BY_SEED_PATH}")
+    print(f"Wrote {OUT_SVG} and {OUT_PNG}")
 
 
-def plot_asr_over_time(rows: Iterable[SummaryRow], exp: str) -> None:
-    sorted_rows = sorted(rows, key=lambda row: row.run_at)
-    if not sorted_rows:
-        print(f"No time-series data found for experiment '{exp}'; skipping ASR-over-time plot.")
-        return
-
-    timestamps = [row.run_at for row in sorted_rows]
-    asrs = [row.asr for row in sorted_rows]
-
-    fig, ax = plt.subplots(figsize=(6, 4))
-    ax.plot(timestamps, asrs, marker="o")
-    ax.set_ylim(0, 1)
-    ax.set_ylabel("Attack Success Rate")
-    ax.set_xlabel("Run time")
-    ax.set_title(f"ASR over time – {exp}")
-    ax.grid(True, linestyle="--", alpha=0.4)
-    fig.autofmt_xdate()
-    fig.tight_layout()
-    PLOTS_DIR.mkdir(parents=True, exist_ok=True)
-    fig.savefig(ASR_OVER_TIME_PATH, dpi=150)
-    plt.close(fig)
-    print(f"Wrote {ASR_OVER_TIME_PATH}")
-
-
-def mean_asr_by_exp(rows: Iterable[SummaryRow]) -> Dict[str, float]:
-    """Compute the mean ASR for each experiment."""
-
-    totals: Dict[str, float] = defaultdict(float)
-    counts: Dict[str, int] = defaultdict(int)
-    for row in rows:
-        exp = row.exp or ""
-        totals[exp] += row.asr
-        counts[exp] += 1
-
-    means: Dict[str, float] = {}
-    for exp, total in totals.items():
-        if counts[exp]:
-            means[exp] = total / counts[exp]
-    return means
-
-
-def plot_summary(rows: Iterable[SummaryRow]) -> None:
-    """Render the summary.svg/png aggregated by experiment."""
-
-    means = mean_asr_by_exp(rows)
-    if not means:
-        print("No experiments found; skipping summary plot.")
-        return
-
-    items = sorted(means.items(), key=lambda item: item[0])
-    labels = [label for label, _ in items]
-    values = [value for _, value in items]
-
-    fig, ax = plt.subplots(figsize=(6, 4))
-    x_positions = range(len(labels))
-    ax.bar(x_positions, values)
-    ax.set_ylim(0, 1)
-    ax.set_ylabel("Mean Attack Success Rate")
-    ax.set_xlabel("Experiment")
-    ax.set_title("Mean ASR by experiment")
-    ax.set_xticks(list(x_positions))
-    ax.set_xticklabels(labels, rotation=20 if len(labels) > 1 else 0)
-    ax.grid(axis="y", linestyle="--", alpha=0.4)
-    fig.tight_layout()
-
-    SUMMARY_SVG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(SUMMARY_SVG_PATH, bbox_inches="tight")
-    fig.savefig(SUMMARY_PNG_PATH, dpi=144, bbox_inches="tight")
-    plt.close(fig)
-    print(f"Wrote {SUMMARY_SVG_PATH}")
-    print(f"Wrote {SUMMARY_PNG_PATH}")
+def parse_args(argv: Optional[List[str]]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Plot aggregated ASR results.")
+    parser.add_argument(
+        "--exp",
+        help="Unused; maintained for backwards compatibility with older Makefile targets.",
+    )
+    return parser.parse_args(argv)
 
 
 def main(argv: Optional[List[str]] = None) -> int:
-    parser = argparse.ArgumentParser(description="Generate quick ASR plots from summary CSV data.")
-    parser.add_argument("--exp", help="Experiment name to filter results for detailed plots.")
-    args = parser.parse_args(argv)
+    parse_args(argv)
 
-    rows = load_rows(SUMMARY_CSV)
+    if not CSV.exists():
+        raise SystemExit("results/summary.csv not found; run `make report` first")
+
+    rows = load_rows(CSV)
     if not rows:
-        return 0
+        raise SystemExit("No usable rows in results/summary.csv")
 
-    plot_summary(rows)
-
-    if args.exp:
-        exp_rows = [row for row in rows if row.exp == args.exp]
-        if not exp_rows:
-            print(
-                f"No results found for experiment '{args.exp}' in {SUMMARY_CSV}; skipping detailed plots."
-            )
-            return 0
-
-        plot_asr_by_seed(exp_rows, args.exp)
-        plot_asr_over_time(exp_rows, args.exp)
+    experiments, means = aggregate_means(rows)
+    plot_summary(experiments, means)
     return 0
 
 
