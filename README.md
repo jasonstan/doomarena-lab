@@ -10,7 +10,7 @@ This repository is a scaffold for the TAUBench Airline example in DoomArena.
 - Run offline: `make install && make run`
 - Tests: `make test` (runs demo + results validation)
 - Schema check: `make check-schema`
-- Results (JSONL) will be written under `results/`.
+- Results (JSONL) will be written under timestamped run folders such as `results/20240101-120000/` (UTC).
 
 ### Quickstart (experiments)
 
@@ -40,14 +40,16 @@ make demo
 open results/summary.svg   # or download from CI artifacts on the PR
 ```
 
-This runs airline_escalating_v1 and airline_static_v1 in SHIM mode with two seeds × three trials, aggregates to results/summary.csv, and renders results/summary.svg with one bar per experiment.
+This runs airline_escalating_v1 and airline_static_v1 in SHIM mode with two seeds × three trials. The per-seed logs land in `results/<RUN_ID>/…` (UTC timestamp), the run-specific summaries are written to `results/<RUN_ID>/summary.*`, and `make report` publishes copies to `results/summary.*` for quick inspection.
 
 ### Run an experiment
 
 ```bash
 make xsweep CONFIG=configs/airline_escalating_v1/exp.yaml
+make report
 head -5 results/summary.csv
-ls -R results/*
+RUN_ID=$(make latest)
+ls results/$RUN_ID
 ```
 
 ### Swapping to real DoomArena classes
@@ -63,7 +65,7 @@ This repo currently uses thin adapters to mirror DoomArena concepts:
 
 ## Results
 
-`make report` also writes `results/summary.md` (a readable notes file) and the CI run uploads it as an artifact.
+Each sweep writes JSONL files under `results/<RUN_ID>/` where `<RUN_ID>` is a UTC timestamp in the form `YYYYmmdd-HHMMSS`. Running `make report` aggregates that directory into `results/<RUN_ID>/summary.csv`, `summary.svg`, and `summary.md`, then publishes copies to `results/summary.*` for backwards compatibility. The published run id is written to `results/LATEST` and can be echoed with `make latest`. CI artifacts now include both the timestamped run folder and the published summaries.
 
 ### Results plot
 
@@ -75,12 +77,25 @@ with more trials carry proportionally more weight in the chart.
 
 ![Results summary](results/summary.svg)
 
-| exp | seeds | mode | ASR | trials | successes | git | run_at |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| airline_static_v1 | 12,11 | SHIM | 0.33 (1/3) | 3 | 1 | 235eb543 | 2025-09-16T16:54:51.365106+00:00 |
-| airline_static_v1 | 11,12 | SHIM | 0.33 (1/3) | 3 | 1 | 235eb543 | 2025-09-16T16:54:51.193991+00:00 |
-| airline_escalating_v1 | 12 | SHIM | 0.33 (1/3) | 3 | 1 | 235eb543 | 2025-09-16T16:54:50.856852+00:00 |
-| airline_escalating_v1 | 11 | SHIM | 0.33 (1/3) | 3 | 1 | 235eb543 | 2025-09-16T16:54:50.677487+00:00 |
+# Experiment summary — 2025-09-16T19:31:21+00:00
+
+- Experiments: 2
+- Total trials: 12
+- Total successes: 4
+- Micro-average ASR: 33.3%
+
+The bar chart below shows trial-weighted attack success rates per experiment (micro-averaged by trials).
+
+![ASR summary](summary.svg)
+
+| Experiment | Trials | Successes | ASR (%) |
+| --- | --- | --- | --- |
+| airline_escalating_v1 | 6 | 2 | 33.3% |
+| airline_static_v1 | 6 | 2 | 33.3% |
+
+---
+
+*How this was generated:* Run `make xsweep …` followed by `make report` to reproduce these notes.
 
 <!-- RESULTS:END -->
 
@@ -99,8 +114,8 @@ Use `make check-schema` to verify the file matches the expected schema.
 
 |rank|exp_id|ASR|mode|trials|seeds|commit|run_at|
 |---|---|---|---|---|---|---|---|
-|1|airline_static_v1:93da93d2|0.333|SHIM|3|12,11|235eb54|2025-09-16T16:54:51.365106+00:00|
-|2|airline_static_v1:93da93d2|0.333|SHIM|3|11,12|235eb54|2025-09-16T16:54:51.193991+00:00|
-|3|airline_escalating_v1:3762657d|0.333|SHIM|3|12|235eb54|2025-09-16T16:54:50.856852+00:00|
-|4|airline_escalating_v1:3762657d|0.333|SHIM|3|11|235eb54|2025-09-16T16:54:50.677487+00:00|
+|1|airline_static_v1:93da93d2|0.333|SHIM|3|12,11|6048d3b|2025-09-16T19:31:19.911401+00:00|
+|2|airline_static_v1:93da93d2|0.333|SHIM|3|11,12|6048d3b|2025-09-16T19:31:19.676163+00:00|
+|3|airline_escalating_v1:3762657d|0.333|SHIM|3|12|6048d3b|2025-09-16T19:31:19.265401+00:00|
+|4|airline_escalating_v1:3762657d|0.333|SHIM|3|11|6048d3b|2025-09-16T19:31:19.016015+00:00|
 <!-- TOPN:END -->

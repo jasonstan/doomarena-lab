@@ -11,12 +11,9 @@ from __future__ import annotations
 
 import csv
 from datetime import datetime, timezone
+import argparse
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional
-
-SUMMARY_CSV = Path("results/summary.csv")
-SUMMARY_MD = Path("results/summary.md")
-
 
 def _parse_int(value: Optional[str]) -> Optional[int]:
     if value is None:
@@ -214,12 +211,27 @@ def render_markdown(experiments: List[ExperimentRow]) -> str:
     return "\n".join(lines)
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Generate Markdown notes for a run")
+    parser.add_argument(
+        "--outdir",
+        default="results",
+        help="Directory containing summary.csv and where summary.md should be written",
+    )
+    return parser.parse_args()
+
+
 def main() -> None:
-    rows = load_summary(SUMMARY_CSV)
+    args = parse_args()
+    outdir = Path(args.outdir).expanduser()
+    summary_csv = outdir / "summary.csv"
+    summary_md = outdir / "summary.md"
+
+    rows = load_summary(summary_csv)
     experiments = aggregate(rows)
     markdown = render_markdown(experiments)
-    SUMMARY_MD.parent.mkdir(parents=True, exist_ok=True)
-    SUMMARY_MD.write_text(markdown, encoding="utf-8")
+    summary_md.parent.mkdir(parents=True, exist_ok=True)
+    summary_md.write_text(markdown, encoding="utf-8")
 
 
 if __name__ == "__main__":

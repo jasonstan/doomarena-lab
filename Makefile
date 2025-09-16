@@ -1,5 +1,7 @@
 .PHONY: venv install test run sweep aggregate report scaffold check-schema plot notes sweep3 real1 xrun xsweep xsweep-all topn demo
 
+SHELL := /bin/bash
+
 VENV := .venv
 PY   := $(VENV)/bin/python
 PIP  := $(VENV)/bin/pip
@@ -17,6 +19,16 @@ ifneq ($(origin MODE), file)
 MODE_ARG := --mode $(MODE)
 MODE_OVERRIDE := $(MODE)
 endif
+
+RUN_ID ?= $(shell date -u "+%Y%m%d-%H%M%S")
+RUN_CURRENT := results/.run_id
+RUN_LATEST := results/LATEST
+ifeq ($(origin RUN_ID), file)
+ifneq ($(wildcard $(RUN_CURRENT)),)
+RUN_ID := $(shell cat $(RUN_CURRENT))
+endif
+endif
+RUN_DIR := results/$(RUN_ID)
 
 TRIALS_ARG :=
 TRIALS_OVERRIDE :=
@@ -70,75 +82,74 @@ check-schema: venv
 	$(PY) scripts/check_schema.py
 
 run:
-	. .venv/bin/activate && python scripts/run_batch.py --exp $(EXP) --seeds "$(SEED)" --trials $(TRIALS) --mode $(MODE)
+	. .venv/bin/activate && python scripts/run_batch.py --exp $(EXP) --seeds "$(SEED)" --trials $(TRIALS) --mode $(MODE) --outdir "$(RUN_DIR)"
+	printf "%s\n" "$(RUN_ID)" > $(RUN_CURRENT)
 
 xrun:
-	. .venv/bin/activate && python scripts/run_experiment.py --config $(CONFIG) --seed $(SEED)
+	. .venv/bin/activate && python scripts/run_experiment.py --config $(CONFIG) --seed $(SEED) --outdir "$(RUN_DIR)"
+	printf "%s\n" "$(RUN_ID)" > $(RUN_CURRENT)
 
 sweep:
-	. .venv/bin/activate && python scripts/run_batch.py --exp $(EXP) --seeds "$(SEEDS)" --trials $(TRIALS) --mode $(MODE)
-	$(MAKE) report
+	. .venv/bin/activate && python scripts/run_batch.py --exp $(EXP) --seeds "$(SEEDS)" --trials $(TRIALS) --mode $(MODE) --outdir "$(RUN_DIR)"
+	printf "%s\n" "$(RUN_ID)" > $(RUN_CURRENT)
+	$(MAKE) report RUN_ID=$(RUN_ID)
 
 .PHONY: demo
 demo:
-	$(MAKE) xsweep CONFIG=configs/airline_escalating_v1/run.yaml EXP=airline_escalating_v1 TRIALS=3 SEEDS="11,12" MODE=SHIM
-	$(MAKE) xsweep CONFIG=configs/airline_static_v1/run.yaml     EXP=airline_static_v1     TRIALS=3 SEEDS="11,12" MODE=SHIM
-	$(MAKE) report
+	$(MAKE) xsweep CONFIG=configs/airline_escalating_v1/run.yaml EXP=airline_escalating_v1 TRIALS=3 SEEDS="11,12" MODE=SHIM RUN_ID=$(RUN_ID)
+	$(MAKE) xsweep CONFIG=configs/airline_static_v1/run.yaml     EXP=airline_static_v1     TRIALS=3 SEEDS="11,12" MODE=SHIM RUN_ID=$(RUN_ID)
+	$(MAKE) report RUN_ID=$(RUN_ID)
 
 .ONESHELL: xsweep
 xsweep:
+	mkdir -p "$(RUN_DIR)"
 	if [ -x "$(PY)" ]; then PYTHON_BIN="$(PY)"; else PYTHON_BIN="python"; fi; \
-	CONFIG_PATH="$(CONFIG)" MODE_OVERRIDE="$(MODE_OVERRIDE)" TRIALS_OVERRIDE="$(TRIALS_OVERRIDE)" SEEDS_OVERRIDE="$(SEEDS_OVERRIDE)" EXP_OVERRIDE="$(EXP)" "$${PYTHON_BIN}" - <<-'PY'
-	import os
-	import shlex
-	import subprocess
-	import sys
-	
-	cmd = [sys.executable, "scripts/xsweep.py", "--config", os.environ["CONFIG_PATH"]]
-	seeds_override = os.environ.get("SEEDS_OVERRIDE", "").strip()
-	if seeds_override: cmd.extend(["--seeds", seeds_override])
-	mode_override = os.environ.get("MODE_OVERRIDE", "").strip()
-	if mode_override: cmd.extend(["--mode", mode_override])
-	trials_override = os.environ.get("TRIALS_OVERRIDE", "").strip()
-	if trials_override: cmd.extend(["--trials", trials_override])
-	exp_override = os.environ.get("EXP_OVERRIDE", "").strip()
-	if exp_override: cmd.extend(["--exp", exp_override])
-	
-	print("xsweep:", " ".join(shlex.quote(part) for part in cmd))
-	sys.exit(subprocess.call(cmd))
-	PY
-
+	CMD=""$$PYTHON_BIN" "scripts/xsweep.py" --config "$(CONFIG)" --outdir "$(RUN_DIR)""; \
+	if [ -n "$(SEEDS_OVERRIDE)" ]; then CMD="$${CMD} --seeds "$(SEEDS_OVERRIDE)""; fi; \
+	if [ -n "$(MODE_OVERRIDE)" ]; then CMD="$${CMD} --mode "$(MODE_OVERRIDE)""; fi; \
+	if [ -n "$(TRIALS_OVERRIDE)" ]; then CMD="$${CMD} --trials "$(TRIALS_OVERRIDE)""; fi; \
+	if [ -n "$(EXP_OVERRIDE)" ]; then CMD="$${CMD} --exp "$(EXP_OVERRIDE)""; fi; \
+	echo "xsweep: $$CMD"; \
+	eval $$CMD; rc=$$?; if [ $$rc -ne 0 ]; then exit $$rc; fi; \
+	printf "%s\n" "$(RUN_ID)" > $(RUN_CURRENT)
 sweep3:
-	$(MAKE) sweep SEEDS="41,42,43" TRIALS=5 MODE=SHIM
+	$(MAKE) sweep SEEDS="41,42,43" TRIALS=5 MODE=SHIM RUN_ID=$(RUN_ID)
 
 xsweep-all:
-	. .venv/bin/activate && $(PY) scripts/xsweep_all.py --glob "$(CONFIG_GLOB)" --seeds "$(SEEDS)" --trials $(TRIALS) --mode $(MODE)
+	. .venv/bin/activate && $(PY) scripts/xsweep_all.py --glob "$(CONFIG_GLOB)" --seeds "$(SEEDS)" --trials $(TRIALS) --mode $(MODE) --outdir "$(RUN_DIR)"
+	printf "%s\n" "$(RUN_ID)" > $(RUN_CURRENT)
 
 topn:
 	$(PY) scripts/update_readme_topn.py
 
 aggregate:
-		if [ -x "$(PY)" ]; then \
-		"$(PY)" scripts/aggregate_results.py; \
+	if [ -x "$(PY)" ]; then \
+		"$(PY)" scripts/aggregate_results.py --outdir "$(RUN_DIR)"; \
 	else \
-		python scripts/aggregate_results.py; \
+		python scripts/aggregate_results.py --outdir "$(RUN_DIR)"; \
 	fi
 
 plot:
 	if [ -f "$(VENV)/bin/activate" ]; then \
-		. "$(VENV)/bin/activate" && python scripts/plot_results.py --exp $(EXP); \
+		. "$(VENV)/bin/activate" && python scripts/plot_results.py --outdir "$(RUN_DIR)"; \
 	else \
-		python scripts/plot_results.py --exp $(EXP); \
+		python scripts/plot_results.py --outdir "$(RUN_DIR)"; \
 	fi
 
 notes:
 	if [ -x "$(PY)" ]; then \
-		"$(PY)" scripts/auto_notes.py; \
+		"$(PY)" scripts/auto_notes.py --outdir "$(RUN_DIR)"; \
 	else \
-		python scripts/auto_notes.py; \
+		python scripts/auto_notes.py --outdir "$(RUN_DIR)"; \
 	fi
 
 report: aggregate plot notes
+	mkdir -p results
+	cp -f "$(RUN_DIR)/summary.csv" results/summary.csv
+	cp -f "$(RUN_DIR)/summary.svg" results/summary.svg
+	cp -f "$(RUN_DIR)/summary.md" results/summary.md
+	printf "%s\n" "$(RUN_ID)" > $(RUN_LATEST)
+	rm -f $(RUN_CURRENT)
 	if [ -x "$(PY)" ]; then \
 		"$(PY)" scripts/update_readme_results.py; \
 		"$(PY)" scripts/update_readme_topn.py; \
@@ -163,5 +174,13 @@ install-tau: install
 
 .PHONY: ci
 ci: install
-	$(MAKE) xsweep MODE=SHIM TRIALS=3 SEEDS=41,42
-	$(MAKE) report
+	$(MAKE) xsweep MODE=SHIM TRIALS=3 SEEDS=41,42 RUN_ID=$(RUN_ID)
+	$(MAKE) report RUN_ID=$(RUN_ID)
+
+.PHONY: latest
+latest:
+	@if [ -f $(RUN_LATEST) ]; then \
+		cat $(RUN_LATEST); \
+	else \
+		echo "No published run."; \
+	fi
