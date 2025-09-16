@@ -60,6 +60,11 @@ test: install demo
 	@test -f results/summary.svg || (echo "missing results/summary.svg" && exit 1)
 	@find results -type f -name '*seed*.jsonl' -print -quit | grep -q . || (echo "no per-seed jsonl files found under results/" && exit 1)
 	@echo "✅ Results schema & artifacts look good."
+	@if [ -x "$(PY)" ]; then \
+	"$(PY)" -m pytest -q; \
+	else \
+	pytest -q; \
+	fi
 
 check-schema: venv
 	$(PY) scripts/check_schema.py
