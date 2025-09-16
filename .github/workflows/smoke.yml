@@ -8,6 +8,10 @@ on:
       - 'Makefile'
       - 'scripts/**'
       - 'configs/**'
+      - 'requirements*.txt'
+      - '**/requirements*.txt'
+      - '**/pyproject.toml'
+      - '**/poetry.lock'
       - '.github/workflows/smoke.yml'
   workflow_dispatch:
 
