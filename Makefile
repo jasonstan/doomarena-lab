@@ -130,4 +130,5 @@ install-tau: install
 
 .PHONY: ci
 ci:
-	SEEDS_OVERRIDE=41,42 TRIALS_OVERRIDE=3 MODE_OVERRIDE=SHIM $(MAKE) report
+	$(MAKE) xsweep MODE=SHIM TRIALS=3 SEEDS=41,42
+	$(MAKE) report
