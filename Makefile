@@ -1,9 +1,10 @@
-.PHONY: venv install test run sweep aggregate report scaffold check-schema plot sweep3 real1 xrun xsweep
+.PHONY: venv install test run sweep aggregate report scaffold check-schema plot sweep3 real1 xrun xsweep xsweep-all topn
 
 VENV := .venv
 PY   := $(VENV)/bin/python
 PIP  := $(VENV)/bin/pip
 CONFIG ?= configs/airline_escalating_v1/run.yaml
+CONFIG_GLOB ?= configs/*/run.yaml
 SEED ?= 42
 SEEDS ?= 41,42,43
 TRIALS ?= 5
@@ -84,6 +85,12 @@ xsweep:
 sweep3:
 	$(MAKE) sweep SEEDS="41,42,43" TRIALS=5 MODE=SHIM
 
+xsweep-all:
+	. .venv/bin/activate && $(PY) scripts/xsweep_all.py --glob "$(CONFIG_GLOB)" --seeds "$(SEEDS)" --trials $(TRIALS) --mode $(MODE)
+
+topn:
+	$(PY) scripts/update_readme_topn.py
+
 aggregate:
 		if [ -x "$(PY)" ]; then \
 		"$(PY)" scripts/aggregate_results.py; \
@@ -101,8 +108,10 @@ plot:
 report: aggregate plot
 		if [ -x "$(PY)" ]; then \
 		"$(PY)" scripts/update_readme_results.py; \
+		"$(PY)" scripts/update_readme_topn.py; \
 	else \
 		python scripts/update_readme_results.py; \
+		python scripts/update_readme_topn.py; \
 	fi
 
 real1:
