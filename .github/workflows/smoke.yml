@@ -25,15 +25,16 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-ci.txt
 
       - name: Create venv and install deps
         shell: bash
         run: |
           python -m venv .venv
           source .venv/bin/activate
-          python -m pip install -U pip wheel
-          # minimal deps to run SHIM + plotting + yaml + tests
-          pip install -U doomarena doomarena-taubench pytest pyyaml matplotlib
+          pip install -U pip wheel
+          pip install -r requirements-ci.txt
 
       - name: Smoke: sweep + report (SHIM)
         shell: bash
