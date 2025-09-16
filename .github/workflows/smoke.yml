@@ -35,11 +35,11 @@ jobs:
           # minimal deps to run SHIM + plotting + yaml + tests
           pip install -U doomarena doomarena-taubench pytest pyyaml matplotlib
 
-      - name: Smoke: report (SHIM)
+      - name: Smoke: sweep + report (SHIM)
         shell: bash
         run: |
           source .venv/bin/activate
-          make report EXP="$EXP" MODE="$MODE" SEEDS="$SEEDS" TRIALS="$TRIALS"
+          make sweep EXP="$EXP" MODE="$MODE" SEEDS="$SEEDS" TRIALS="$TRIALS"
           echo "---- results/summary.csv (head) ----"
           head -5 results/summary.csv || true
           echo "---- grep ASR from run logs if present ----"
