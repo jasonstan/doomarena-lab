@@ -111,7 +111,11 @@ def write_meta(
     if meta_path is not None:
         meta_file = Path(meta_path)
         if not meta_file.is_absolute():
-            meta_file = target_dir / meta_file
+            target_parts = target_dir.parts
+            if target_dir.anchor:
+                target_parts = target_parts[1:]
+            if meta_file.parts[: len(target_parts)] != target_parts:
+                meta_file = target_dir / meta_file
     else:
         meta_file = target_dir / "meta.json"
     meta_file.parent.mkdir(parents=True, exist_ok=True)
