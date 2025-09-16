@@ -1,15 +1,12 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
-import platform
 import random
-import subprocess
 import sys
-from datetime import datetime, timezone
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Dict, Iterable
+from typing import Any, Callable, Dict
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -18,20 +15,12 @@ if str(SCRIPT_DIR) not in sys.path:
 
 from adapters.attacks import EscalatingDialogueAttackAdapter
 from adapters.filters import OutOfPolicyRefundFilter
-from adapters.results_logger import experiment_header, jsonl_writer
-from exp import (
-    load_config,
-    make_exp_id,
-    load_summary_line,
-    read_summary,
-    upsert_summary_row,
-    write_summary,
-)
+from adapters.results_logger import jsonl_writer
+from exp import load_config, load_summary_line
 from taubench_airline_da import offline_amount_for_trial
 
 from capture_meta import write_meta
-
-SUMMARY_PATH = Path("results") / "summary.csv"
+from run_meta import cfg_hash, git_info, now_iso
 
 
 def parse_args() -> argparse.Namespace:
@@ -42,38 +31,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--trials", type=int, help="Override config trials count", default=None)
     parser.add_argument("--exp", help="Override config experiment name", default=None)
     return parser.parse_args()
-
-
-def git_sha() -> str:
-    try:
-        return (
-            subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], text=True)
-            .strip()
-        )
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        return "unknown"
-
-
-def _git_diff_is_clean(args: list[str] | None = None) -> bool:
-    cmd = ["git", "diff", "--quiet"]
-    if args:
-        cmd.extend(args)
-    result = subprocess.run(cmd, check=False)
-    return result.returncode == 0
-
-
-def repo_is_dirty() -> bool:
-    if not _git_diff_is_clean():
-        return True
-    if not _git_diff_is_clean(["--cached"]):
-        return True
-    return False
-
-
-def generate_run_id() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
-
-
 def _prepare_attack(cfg: Dict[str, Any]) -> tuple[EscalatingDialogueAttackAdapter, int]:
     suffixes = cfg.get("suffixes") or []
     suffix_list = [str(item) for item in suffixes]
@@ -95,23 +52,15 @@ def _prepare_judge(cfg: Dict[str, Any]) -> OutOfPolicyRefundFilter:
 def run_shim(
     cfg: Dict[str, Any],
     seed: int,
-    jsonl_path: Path,
+    writer: Callable[[Dict[str, Any]], None],
     attack_cfg: Dict[str, Any],
     judge_cfg: Dict[str, Any],
-    exp_id: str,
 ) -> Dict[str, Any]:
     trials = int(cfg.get("trials", 0))
     random.seed(seed)
 
     attack, turns = _prepare_attack(attack_cfg)
     judge = _prepare_judge(judge_cfg)
-
-    writer = jsonl_writer(jsonl_path.as_posix())
-
-    header_config = json.loads(json.dumps(cfg))
-    header_config["seed"] = seed
-    header_config["exp_id"] = exp_id
-    writer(experiment_header(header_config))
 
     successes = 0
     for trial_index in range(trials):
@@ -169,12 +118,17 @@ def main() -> None:
     if not exp:
         raise SystemExit("Config missing 'exp' field")
 
-    exp_id = make_exp_id(cfg)
+    config_path = Path(args.config)
+    cfg_hash_value = cfg_hash(config_path)
+    config_parent = config_path.parent.name or config_path.stem
+    short_hash = cfg_hash_value[:8] if cfg_hash_value else "unknown"
+    exp_id = f"{config_parent}:{short_hash}"
+
     seed = args.seed
-    seeds = cfg.get("seeds") or []
+    seeds_cfg = cfg.get("seeds") or []
     if seed is None:
-        if seeds:
-            seed = int(seeds[0])
+        if seeds_cfg:
+            seed = int(seeds_cfg[0])
         else:
             raise SystemExit("Seed must be provided via --seed or config 'seeds'")
     seed = int(seed)
@@ -192,24 +146,71 @@ def main() -> None:
     attack_cfg = cfg.get("attack", {}) or {}
     judge_cfg = cfg.get("judge", {}) or {}
 
+    writer = jsonl_writer(jsonl_path.as_posix())
+    git_meta = git_info()
+
+    seeds_list: list[Any] = []
+    seen_seeds: set[str] = set()
+
+    def _add_seed(value: Any) -> None:
+        if value is None:
+            return
+        key = str(value)
+        if key in seen_seeds:
+            return
+        seen_seeds.add(key)
+        seeds_list.append(value)
+
+    _add_seed(seed)
+    if isinstance(seeds_cfg, Iterable) and not isinstance(seeds_cfg, (str, bytes)):
+        for item in seeds_cfg:
+            _add_seed(item)
+    elif seeds_cfg:
+        _add_seed(seeds_cfg)
+
     actual_mode = mode
     summary: Dict[str, Any]
+    header_written = False
+
+    def emit_header(mode_value: str) -> None:
+        nonlocal header_written
+        if header_written:
+            return
+        header = {
+            "event": "header",
+            "exp": exp,
+            "config": config_path.as_posix(),
+            "cfg_hash": cfg_hash_value,
+            "exp_id": exp_id,
+            "mode": mode_value,
+            "trials": trials,
+            "seed": seed,
+            "seeds": seeds_list,
+            "git_commit": git_meta.get("commit", "unknown"),
+            "git_branch": git_meta.get("branch", "unknown"),
+            "run_at": now_iso(),
+        }
+        writer(header)
+        header_written = True
 
     if mode == "REAL":
-        try:
+        try:  # pragma: no cover - optional dependency
             import tau_bench  # type: ignore
         except Exception as exc:  # pragma: no cover - optional dependency
             print(f"REAL mode unavailable ({exc}); falling back to SHIM")
             actual_mode = "SHIM"
-            summary = run_shim(cfg, seed, jsonl_path, attack_cfg, judge_cfg, exp_id)
+            emit_header(actual_mode)
+            summary = run_shim(cfg, seed, writer, attack_cfg, judge_cfg)
         else:  # pragma: no cover - optional dependency
             try:
                 from taubench_airline_da_real import run_real
             except Exception:
                 print("REAL runner not available; using SHIM")
                 actual_mode = "SHIM"
-                summary = run_shim(cfg, seed, jsonl_path, attack_cfg, judge_cfg, exp_id)
+                emit_header(actual_mode)
+                summary = run_shim(cfg, seed, writer, attack_cfg, judge_cfg)
             else:
+                emit_header(actual_mode)
                 run_real({
                     "seed": seed,
                     "trials": trials,
@@ -228,7 +229,8 @@ def main() -> None:
                         "asr": 0.0,
                     }
     else:
-        summary = run_shim(cfg, seed, jsonl_path, attack_cfg, judge_cfg, exp_id)
+        emit_header(actual_mode)
+        summary = run_shim(cfg, seed, writer, attack_cfg, judge_cfg)
 
     trials_count = int(summary.get("trials", trials))
     successes = int(summary.get("successes", 0))
@@ -237,60 +239,13 @@ def main() -> None:
         successes = trials_count
         asr = successes / trials_count
 
-    commit = git_sha()
-    run_id = generate_run_id()
-    dirty = repo_is_dirty()
-
-    seeds_config: Iterable[Any] | None = cfg.get("seeds")
-    if isinstance(seeds_config, Iterable) and not isinstance(seeds_config, (str, bytes)):
-        meta_seeds = list(seeds_config)
-    elif seeds_config is None:
-        meta_seeds = [seed]
-    else:
-        meta_seeds = [seeds_config]
-    meta_seeds.append(seed)
-
-    meta = write_meta(
+    write_meta(
         results_dir,
         exp_id=exp_id,
-        seeds=meta_seeds,
+        seeds=seeds_list,
         trials=trials_count,
         mode=actual_mode,
     )
-
-    packages_value = meta.get("packages", {})
-    if isinstance(packages_value, dict):
-        packages_str = json.dumps(packages_value, sort_keys=True)
-    else:
-        packages_str = str(packages_value)
-    seeds_str = ""
-    seeds_meta = meta.get("seeds", [])
-    if isinstance(seeds_meta, Iterable) and not isinstance(seeds_meta, (str, bytes)):
-        seeds_str = ",".join(str(item) for item in seeds_meta)
-    elif isinstance(seeds_meta, (str, bytes)):
-        seeds_str = str(seeds_meta)
-
-    rows = read_summary(SUMMARY_PATH)
-    row = {
-        "timestamp": str(meta.get("timestamp", datetime.now(timezone.utc).isoformat())),
-        "run_id": run_id,
-        "git_sha": str(meta.get("git_sha", commit)),
-        "git_branch": str(meta.get("git_branch", "")),
-        "repo_dirty": "true" if dirty else "false",
-        "exp": str(exp),
-        "exp_id": str(meta.get("exp_id", exp_id)),
-        "seed": str(seed),
-        "mode": str(meta.get("mode", actual_mode)),
-        "trials": str(meta.get("trials", trials_count)),
-        "successes": str(successes),
-        "asr": f"{asr:.6f}",
-        "python_version": str(meta.get("python_version", platform.python_version())),
-        "packages": packages_str,
-        "seeds": seeds_str,
-        "path": jsonl_path.as_posix(),
-    }
-    upsert_summary_row(rows, row)
-    write_summary(SUMMARY_PATH, rows)
 
     print(f"ASR={asr:.6f}")
     print(f"JSONL={jsonl_path.as_posix()}")

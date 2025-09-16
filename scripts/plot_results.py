@@ -8,7 +8,7 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 import matplotlib
 
@@ -27,14 +27,13 @@ SUMMARY_PNG_PATH = Path("results/summary.png")
 class SummaryRow:
     """Typed representation of a single summary.csv row."""
 
-    timestamp: datetime
-    run_id: str
+    run_at: datetime
     exp: str
     seed: str
     asr: float
 
 
-def parse_timestamp(raw: str) -> Optional[datetime]:
+def parse_run_at(raw: str) -> Optional[datetime]:
     """Parse an ISO timestamp, normalising to naive UTC datetimes."""
 
     if not raw:
@@ -48,6 +47,18 @@ def parse_timestamp(raw: str) -> Optional[datetime]:
     return dt
 
 
+def extract_seed(raw: Any) -> str:
+    """Extract a representative seed value from the CSV column."""
+
+    if raw is None:
+        return ""
+    text = str(raw)
+    parts = [part.strip() for part in text.split(",") if part.strip()]
+    if parts:
+        return parts[0]
+    return text.strip()
+
+
 def load_rows(path: Path) -> List[SummaryRow]:
     """Load and validate rows from the summary CSV."""
 
@@ -59,23 +70,22 @@ def load_rows(path: Path) -> List[SummaryRow]:
         reader = csv.DictReader(csv_file)
         rows: List[SummaryRow] = []
         for raw in reader:
-            timestamp = parse_timestamp(raw.get("timestamp", ""))
-            if timestamp is None:
-                run_id = raw.get("run_id", "<unknown>")
-                print(f"Skipping run {run_id}: invalid timestamp '{raw.get('timestamp')}'.")
+            run_at = parse_run_at(raw.get("run_at", ""))
+            if run_at is None:
+                exp_id = raw.get("exp_id", "<unknown>")
+                print(f"Skipping run {exp_id}: invalid timestamp '{raw.get('run_at')}'.")
                 continue
             try:
                 asr = float(raw.get("asr", ""))
             except (TypeError, ValueError):
-                run_id = raw.get("run_id", "<unknown>")
-                print(f"Skipping run {run_id}: invalid ASR '{raw.get('asr')}'.")
+                exp_id = raw.get("exp_id", "<unknown>")
+                print(f"Skipping run {exp_id}: invalid ASR '{raw.get('asr')}'.")
                 continue
             exp = raw.get("exp") or ""
-            seed = str(raw.get("seed", ""))
+            seed = extract_seed(raw.get("seeds", ""))
             rows.append(
                 SummaryRow(
-                    timestamp=timestamp,
-                    run_id=raw.get("run_id", ""),
+                    run_at=run_at,
                     exp=exp,
                     seed=seed,
                     asr=asr,
@@ -93,7 +103,7 @@ def latest_by_seed(rows: Iterable[SummaryRow]) -> Dict[str, SummaryRow]:
     latest: Dict[str, SummaryRow] = {}
     for row in rows:
         existing = latest.get(row.seed)
-        if existing is None or row.timestamp > existing.timestamp:
+        if existing is None or row.run_at > existing.run_at:
             latest[row.seed] = row
     return latest
 
@@ -140,19 +150,19 @@ def plot_asr_by_seed(rows: Iterable[SummaryRow], exp: str) -> None:
 
 
 def plot_asr_over_time(rows: Iterable[SummaryRow], exp: str) -> None:
-    sorted_rows = sorted(rows, key=lambda row: row.timestamp)
+    sorted_rows = sorted(rows, key=lambda row: row.run_at)
     if not sorted_rows:
         print(f"No time-series data found for experiment '{exp}'; skipping ASR-over-time plot.")
         return
 
-    timestamps = [row.timestamp for row in sorted_rows]
+    timestamps = [row.run_at for row in sorted_rows]
     asrs = [row.asr for row in sorted_rows]
 
     fig, ax = plt.subplots(figsize=(6, 4))
     ax.plot(timestamps, asrs, marker="o", color="#55A868")
     ax.set_ylim(0, 1)
     ax.set_ylabel("Attack Success Rate")
-    ax.set_xlabel("Timestamp")
+    ax.set_xlabel("Run time")
     ax.set_title(f"ASR over time – {exp}")
     ax.grid(True, linestyle="--", alpha=0.4)
     fig.autofmt_xdate()

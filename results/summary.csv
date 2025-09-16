@@ -1,2 +1,4 @@
-timestamp,run_id,git_sha,git_branch,repo_dirty,exp,exp_id,seed,mode,trials,successes,asr,python_version,packages,seeds,path
-2025-09-16T06:09:08.512780+00:00,2025-09-16T06-09-08Z,863ba65,work,true,airline_escalating_v1,6f86f87e,42,SHIM,5,3,0.600000,3.11.12,"{""doomarena"": ""n/a"", ""doomarena_taubench"": ""n/a"", ""tau_bench"": ""n/a""}","41,42,43",results/airline_escalating_v1/airline_escalating_v1_seed42.jsonl
+exp_id,exp,config,cfg_hash,mode,seeds,trials,successes,asr,git_commit,run_at
+airline_escalating_v1:1a1a04db,airline_escalating_v1,configs/airline_escalating_v1/exp.yaml,1a1a04dbc856c92851c80e101c9a246e33da09e6,SHIM,"41,42,43",5,3,0.600000,c98ef02d4c458e578f0191a60aea8b7852379e3d,2025-09-16T08:01:09.726240Z
+airline_escalating_v1:1a1a04db,airline_escalating_v1,configs/airline_escalating_v1/exp.yaml,1a1a04dbc856c92851c80e101c9a246e33da09e6,SHIM,"42,41,43",5,3,0.600000,c98ef02d4c458e578f0191a60aea8b7852379e3d,2025-09-16T08:01:12.610826Z
+airline_escalating_v1:1a1a04db,airline_escalating_v1,configs/airline_escalating_v1/exp.yaml,1a1a04dbc856c92851c80e101c9a246e33da09e6,SHIM,"43,41,42",5,3,0.600000,c98ef02d4c458e578f0191a60aea8b7852379e3d,2025-09-16T08:01:15.606971Z

@@ -46,9 +46,11 @@ This repo currently uses thin adapters to mirror DoomArena concepts:
 
 ![Results summary](results/summary.svg)
 
-| exp | seed | mode | ASR | trials | successes | path |
-| --- | --- | --- | --- | --- | --- | --- |
-| airline_escalating_v1 | 42 | SHIM | 0.60 (3/5) | 5 | 3 | [airline_escalating_v1_seed42](results/airline_escalating_v1/airline_escalating_v1_seed42.jsonl) |
+| exp | seeds | mode | ASR | trials | successes | git | run_at |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| airline_escalating_v1 | 43,41,42 | SHIM | 0.60 (3/5) | 5 | 3 | c98ef02d | 2025-09-16T08:01:15.606971Z |
+| airline_escalating_v1 | 42,41,43 | SHIM | 0.60 (3/5) | 5 | 3 | c98ef02d | 2025-09-16T08:01:12.610826Z |
+| airline_escalating_v1 | 41,42,43 | SHIM | 0.60 (3/5) | 5 | 3 | c98ef02d | 2025-09-16T08:01:09.726240Z |
 
 <!-- RESULTS:END -->
 
@@ -57,7 +59,7 @@ This repo currently uses thin adapters to mirror DoomArena concepts:
 Each run writes `results/<exp>/meta.json` with execution metadata. `results/summary.csv` includes these fields and is locked to the following header (order matters):
 
 ```
-timestamp,run_id,git_sha,git_branch,repo_dirty,exp,exp_id,seed,mode,trials,successes,asr,python_version,packages,seeds,path
+exp_id,exp,config,cfg_hash,mode,seeds,trials,successes,asr,git_commit,run_at
 ```
 
 Use `make check-schema` to verify the file matches the expected schema.
