@@ -43,7 +43,7 @@ install: venv
 	$(PIP) install -U doomarena doomarena-taubench pytest pyyaml pandas matplotlib
 	$(PY) scripts/ensure_tau_bench.py || (echo "tau_bench unavailable; continuing without real τ-Bench" && exit 0)
 
-test: demo
+test: install demo
 	@echo "🔎 Validating results layout..."
 	@test -f results/summary.csv || (echo "missing results/summary.csv" && exit 1)
 	@python - <<-'PY'
