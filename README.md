@@ -63,6 +63,8 @@ This repo currently uses thin adapters to mirror DoomArena concepts:
 
 ## Results
 
+`make report` also writes `results/summary.md` (a readable notes file) and the CI run uploads it as an artifact.
+
 ### Results plot
 
 The grouped ASR bars report the overall attack success rate per experiment as total
