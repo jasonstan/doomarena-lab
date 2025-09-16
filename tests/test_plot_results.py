@@ -18,6 +18,8 @@ def test_plot_results_smoke():
     expected_files = [
         plots_dir / "asr_by_seed.png",
         plots_dir / "asr_over_time.png",
+        Path("results/summary.svg"),
+        Path("results/summary.png"),
     ]
 
     for plot_file in expected_files:

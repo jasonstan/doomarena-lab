@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import csv
 import sys
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -139,7 +140,7 @@ def plot_asr_by_seed(rows: Iterable[SummaryRow], exp: str) -> None:
     asrs = [row.asr for _, row in latest_rows]
 
     fig, ax = plt.subplots(figsize=(6, 4))
-    ax.bar(seeds, asrs, color="#4C72B0")
+    ax.bar(seeds, asrs)
     ax.set_ylim(0, 1)
     ax.set_ylabel("Attack Success Rate")
     ax.set_xlabel("Seed")
@@ -147,14 +148,9 @@ def plot_asr_by_seed(rows: Iterable[SummaryRow], exp: str) -> None:
     ax.grid(axis="y", linestyle="--", alpha=0.4)
     fig.tight_layout()
     PLOTS_DIR.mkdir(parents=True, exist_ok=True)
-    SUMMARY_SVG_PATH.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(ASR_BY_SEED_PATH, dpi=150)
-    fig.savefig(SUMMARY_SVG_PATH, bbox_inches="tight")
-    fig.savefig(SUMMARY_PNG_PATH, dpi=144, bbox_inches="tight")
     plt.close(fig)
     print(f"Wrote {ASR_BY_SEED_PATH}")
-    print(f"Wrote {SUMMARY_SVG_PATH}")
-    print(f"Wrote {SUMMARY_PNG_PATH}")
 
 
 def plot_asr_over_time(rows: Iterable[SummaryRow], exp: str) -> None:
@@ -167,7 +163,7 @@ def plot_asr_over_time(rows: Iterable[SummaryRow], exp: str) -> None:
     asrs = [row.asr for row in sorted_rows]
 
     fig, ax = plt.subplots(figsize=(6, 4))
-    ax.plot(timestamps, asrs, marker="o", color="#55A868")
+    ax.plot(timestamps, asrs, marker="o")
     ax.set_ylim(0, 1)
     ax.set_ylabel("Attack Success Rate")
     ax.set_xlabel("Run time")
@@ -181,22 +177,76 @@ def plot_asr_over_time(rows: Iterable[SummaryRow], exp: str) -> None:
     print(f"Wrote {ASR_OVER_TIME_PATH}")
 
 
+def mean_asr_by_exp(rows: Iterable[SummaryRow]) -> Dict[str, float]:
+    """Compute the mean ASR for each experiment."""
+
+    totals: Dict[str, float] = defaultdict(float)
+    counts: Dict[str, int] = defaultdict(int)
+    for row in rows:
+        exp = row.exp or ""
+        totals[exp] += row.asr
+        counts[exp] += 1
+
+    means: Dict[str, float] = {}
+    for exp, total in totals.items():
+        if counts[exp]:
+            means[exp] = total / counts[exp]
+    return means
+
+
+def plot_summary(rows: Iterable[SummaryRow]) -> None:
+    """Render the summary.svg/png aggregated by experiment."""
+
+    means = mean_asr_by_exp(rows)
+    if not means:
+        print("No experiments found; skipping summary plot.")
+        return
+
+    items = sorted(means.items(), key=lambda item: item[0])
+    labels = [label for label, _ in items]
+    values = [value for _, value in items]
+
+    fig, ax = plt.subplots(figsize=(6, 4))
+    x_positions = range(len(labels))
+    ax.bar(x_positions, values)
+    ax.set_ylim(0, 1)
+    ax.set_ylabel("Mean Attack Success Rate")
+    ax.set_xlabel("Experiment")
+    ax.set_title("Mean ASR by experiment")
+    ax.set_xticks(list(x_positions))
+    ax.set_xticklabels(labels, rotation=20 if len(labels) > 1 else 0)
+    ax.grid(axis="y", linestyle="--", alpha=0.4)
+    fig.tight_layout()
+
+    SUMMARY_SVG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(SUMMARY_SVG_PATH, bbox_inches="tight")
+    fig.savefig(SUMMARY_PNG_PATH, dpi=144, bbox_inches="tight")
+    plt.close(fig)
+    print(f"Wrote {SUMMARY_SVG_PATH}")
+    print(f"Wrote {SUMMARY_PNG_PATH}")
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="Generate quick ASR plots from summary CSV data.")
-    parser.add_argument("--exp", required=True, help="Experiment name to filter results.")
+    parser.add_argument("--exp", help="Experiment name to filter results for detailed plots.")
     args = parser.parse_args(argv)
 
     rows = load_rows(SUMMARY_CSV)
     if not rows:
         return 0
 
-    exp_rows = [row for row in rows if row.exp == args.exp]
-    if not exp_rows:
-        print(f"No results found for experiment '{args.exp}' in {SUMMARY_CSV}; nothing to plot.")
-        return 0
+    plot_summary(rows)
 
-    plot_asr_by_seed(exp_rows, args.exp)
-    plot_asr_over_time(exp_rows, args.exp)
+    if args.exp:
+        exp_rows = [row for row in rows if row.exp == args.exp]
+        if not exp_rows:
+            print(
+                f"No results found for experiment '{args.exp}' in {SUMMARY_CSV}; skipping detailed plots."
+            )
+            return 0
+
+        plot_asr_by_seed(exp_rows, args.exp)
+        plot_asr_over_time(exp_rows, args.exp)
     return 0
 
 

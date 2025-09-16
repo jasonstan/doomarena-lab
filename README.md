@@ -24,6 +24,16 @@ make plot
 make real1
 ```
 
+### Quick Demo (compare two experiments)
+
+```bash
+make install
+make demo
+open results/summary.svg   # or download from CI artifacts on the PR
+```
+
+This runs airline_escalating_v1 and airline_static_v1 in SHIM mode with two seeds × three trials, aggregates to results/summary.csv, and renders results/summary.svg with one bar per experiment.
+
 ### Run an experiment
 
 ```bash
@@ -46,17 +56,14 @@ This repo currently uses thin adapters to mirror DoomArena concepts:
 ## Results
 <!-- RESULTS:BEGIN -->
 
-**Results & artifacts:** The CI smoke run (SHIM sweep) uploads `results/summary.csv` and `results/summary.png` as build artifacts on every PR. See the latest runs on the **Actions** tab.
-
 ![Results summary](results/summary.svg)
 
 | exp | seeds | mode | ASR | trials | successes | git | run_at |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| airline_escalating_v1 | 42 | SHIM | 0.33 (1/3) | 3 | 1 | 82bdb477 | 2025-09-16T08:57:43.543842Z |
-| airline_escalating_v1 | 41 | SHIM | 0.33 (1/3) | 3 | 1 | 82bdb477 | 2025-09-16T08:57:43.370835Z |
-| airline_escalating_v1 | 43,41,42 | SHIM | 0.60 (3/5) | 5 | 3 | c98ef02d | 2025-09-16T08:01:15.606971Z |
-| airline_escalating_v1 | 42,41,43 | SHIM | 0.60 (3/5) | 5 | 3 | c98ef02d | 2025-09-16T08:01:12.610826Z |
-| airline_escalating_v1 | 41,42,43 | SHIM | 0.60 (3/5) | 5 | 3 | c98ef02d | 2025-09-16T08:01:09.726240Z |
+| airline_static_v1 | 12,11 | SHIM | 0.33 (1/3) | 3 | 1 | 235eb543 | 2025-09-16T16:54:51.365106+00:00 |
+| airline_static_v1 | 11,12 | SHIM | 0.33 (1/3) | 3 | 1 | 235eb543 | 2025-09-16T16:54:51.193991+00:00 |
+| airline_escalating_v1 | 12 | SHIM | 0.33 (1/3) | 3 | 1 | 235eb543 | 2025-09-16T16:54:50.856852+00:00 |
+| airline_escalating_v1 | 11 | SHIM | 0.33 (1/3) | 3 | 1 | 235eb543 | 2025-09-16T16:54:50.677487+00:00 |
 
 <!-- RESULTS:END -->
 
@@ -75,9 +82,8 @@ Use `make check-schema` to verify the file matches the expected schema.
 
 |rank|exp_id|ASR|mode|trials|seeds|commit|run_at|
 |---|---|---|---|---|---|---|---|
-|1|airline_escalating_v1:1a1a04db|0.600|SHIM|5|43,41,42|c98ef02|2025-09-16T08:01:15.606971Z|
-|2|airline_escalating_v1:1a1a04db|0.600|SHIM|5|42,41,43|c98ef02|2025-09-16T08:01:12.610826Z|
-|3|airline_escalating_v1:1a1a04db|0.600|SHIM|5|41,42,43|c98ef02|2025-09-16T08:01:09.726240Z|
-|4|airline_escalating_v1:3762657d|0.333|SHIM|3|42|82bdb47|2025-09-16T08:57:43.543842Z|
-|5|airline_escalating_v1:3762657d|0.333|SHIM|3|41|82bdb47|2025-09-16T08:57:43.370835Z|
+|1|airline_static_v1:93da93d2|0.333|SHIM|3|12,11|235eb54|2025-09-16T16:54:51.365106+00:00|
+|2|airline_static_v1:93da93d2|0.333|SHIM|3|11,12|235eb54|2025-09-16T16:54:51.193991+00:00|
+|3|airline_escalating_v1:3762657d|0.333|SHIM|3|12|235eb54|2025-09-16T16:54:50.856852+00:00|
+|4|airline_escalating_v1:3762657d|0.333|SHIM|3|11|235eb54|2025-09-16T16:54:50.677487+00:00|
 <!-- TOPN:END -->
