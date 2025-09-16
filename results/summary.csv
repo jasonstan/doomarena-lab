@@ -1,2 +1,2 @@
-timestamp,run_id,git_sha,repo_dirty,exp,seed,mode,trials,successes,asr,py_version,path
-2025-09-15T23:46:15.716381+00:00,2025-09-15T23-46-15Z,1488f6f,true,airline_escalating_v1,42,SHIM,5,3,0.600000,3.11.12,results/airline_escalating_v1/airline_escalating_seed42.jsonl
+timestamp,run_id,git_sha,git_branch,repo_dirty,exp,exp_id,seed,mode,trials,successes,asr,python_version,packages,seeds,path
+2025-09-16T06:09:08.512780+00:00,2025-09-16T06-09-08Z,863ba65,work,true,airline_escalating_v1,6f86f87e,42,SHIM,5,3,0.600000,3.11.12,"{""doomarena"": ""n/a"", ""doomarena_taubench"": ""n/a"", ""tau_bench"": ""n/a""}","41,42,43",results/airline_escalating_v1/airline_escalating_v1_seed42.jsonl
