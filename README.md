@@ -54,6 +54,13 @@ This repo currently uses thin adapters to mirror DoomArena concepts:
 **Next step:** replace these adapters with the real DoomArena/τ-Bench classes and keep the same CLI + JSONL outputs so experiment configs remain unchanged.
 
 ## Results
+
+### Results plot
+
+The grouped ASR bars report the overall attack success rate per experiment as total
+successes divided by total trials (a trial-weighted micro average), so experiments
+with more trials carry proportionally more weight in the chart.
+
 <!-- RESULTS:BEGIN -->
 
 ![Results summary](results/summary.svg)
