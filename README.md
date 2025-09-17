@@ -1,8 +1,8 @@
-[![Smoke](https://github.com/jasonstan/doomarena-quickstart/actions/workflows/smoke.yml/badge.svg)](https://github.com/jasonstan/doomarena-quickstart/actions/workflows/smoke.yml)
+[![smoke](https://github.com/jasonstan/doomarena-lab/actions/workflows/smoke.yml/badge.svg?branch=main)](https://github.com/jasonstan/doomarena-lab/actions/workflows/smoke.yml)
 
-# TAUBENCH Airline Scaffold
+# doomarena-lab
 
-This repository is a scaffold for the TAUBench Airline example in DoomArena.
+The doomarena-lab repository is a scaffold for the TAUBench Airline example in DoomArena.
 
 ## Experiments
 - Use `make scaffold` once to create folders.
