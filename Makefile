@@ -154,9 +154,9 @@ plot:
 
 notes:
 	if [ -x "$(PY)" ]; then \
-		"$(PY)" scripts/auto_notes.py --outdir "$(RUN_DIR)"; \
+		"$(PY)" scripts/aggregate_results.py --outdir "$(RUN_DIR)"; \
 	else \
-		python scripts/auto_notes.py --outdir "$(RUN_DIR)"; \
+		python scripts/aggregate_results.py --outdir "$(RUN_DIR)"; \
 	fi
 
 report: aggregate plot notes
@@ -164,6 +164,7 @@ report: aggregate plot notes
 	cp -f "$(RUN_DIR)/summary.csv" results/summary.csv
 	cp -f "$(RUN_DIR)/summary.svg" results/summary.svg
 	cp -f "$(RUN_DIR)/summary.md" results/summary.md
+	cp -f "$(RUN_DIR)/notes.md" results/notes.md 2>/dev/null || true
 	printf "%s\n" "$(RUN_ID)" > $(RUN_LATEST)
 	rm -f $(RUN_CURRENT)
 	if [ -x "$(PY)" ]; then \

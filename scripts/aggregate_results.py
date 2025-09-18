@@ -3,8 +3,10 @@ from __future__ import annotations
 import csv
 import json
 import argparse
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 SUMMARY_COLUMNS: Tuple[str, ...] = (
     "exp_id",
@@ -19,6 +21,24 @@ SUMMARY_COLUMNS: Tuple[str, ...] = (
     "git_commit",
     "run_at",
 )
+
+
+@dataclass
+class ExperimentSummary:
+    name: str
+    trials: int
+    weighted_successes: float
+    successes: Optional[int]
+
+    @property
+    def asr(self) -> float:
+        if self.trials <= 0:
+            return 0.0
+        return self.weighted_successes / float(self.trials)
+
+    @property
+    def asr_percent(self) -> float:
+        return self.asr * 100.0
 
 
 def read_jsonl(path: Path) -> Tuple[Dict[str, Any], Dict[str, Any]]:
@@ -65,6 +85,30 @@ def _stringify(value: Any) -> str:
     if value is None:
         return ""
     return str(value)
+
+
+def _parse_optional_int(value: Any) -> Optional[int]:
+    if value is None:
+        return None
+    text = _stringify(value).strip()
+    if not text:
+        return None
+    try:
+        return int(float(text))
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_optional_float(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    text = _stringify(value).strip()
+    if not text:
+        return None
+    try:
+        return float(text)
+    except (TypeError, ValueError):
+        return None
 
 
 def _collect_seeds(header: Dict[str, Any]) -> str:
@@ -125,6 +169,43 @@ def _stringify_seeds(value: Any) -> str:
     if value is None:
         return ""
     return _stringify(value)
+
+
+def _clamp(value: float, minimum: float, maximum: float) -> float:
+    if value < minimum:
+        return minimum
+    if value > maximum:
+        return maximum
+    return value
+
+
+def _parse_iso_timestamp(value: str) -> Optional[datetime]:
+    text = _stringify(value).strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _dedupe_preserve_order(values: Iterable[str]) -> List[str]:
+    seen: set[str] = set()
+    ordered: List[str] = []
+    for value in values:
+        text = _stringify(value).strip()
+        if not text:
+            continue
+        if text in seen:
+            continue
+        seen.add(text)
+        ordered.append(text)
+    return ordered
 
 
 def build_row(path: Path, header: Dict[str, Any], summary: Dict[str, Any]) -> Dict[str, str]:
@@ -263,6 +344,254 @@ def write_summary_md(base_dir: Path, rows: List[Dict[str, str]]) -> None:
     md_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _collect_seed_tokens(rows: Iterable[Dict[str, str]]) -> List[str]:
+    seen: set[str] = set()
+    ordered: List[str] = []
+    for row in rows:
+        seeds_value = row.get("seeds")
+        if seeds_value is None:
+            continue
+        raw = _stringify(seeds_value).replace(";", ",")
+        if not raw:
+            continue
+        for chunk in raw.split(","):
+            token = chunk.strip()
+            if not token:
+                continue
+            if token in seen:
+                continue
+            seen.add(token)
+            ordered.append(token)
+    return ordered
+
+
+def summarise_experiments(rows: Iterable[Dict[str, str]]) -> List[ExperimentSummary]:
+    aggregates: Dict[str, Dict[str, Any]] = {}
+
+    for row in rows:
+        exp_name = _stringify(row.get("exp"))
+        exp = exp_name.strip()
+        if not exp:
+            continue
+
+        trials_value = _parse_optional_int(row.get("trials"))
+        if trials_value is None or trials_value <= 0:
+            continue
+
+        successes_value = _parse_optional_int(row.get("successes"))
+        asr_value = _parse_optional_float(row.get("asr"))
+
+        if successes_value is None and asr_value is None:
+            continue
+
+        bucket = aggregates.setdefault(
+            exp,
+            {
+                "trials": 0,
+                "weighted_successes": 0.0,
+                "successes": 0,
+                "has_exact_successes": True,
+            },
+        )
+
+        bucket["trials"] = int(bucket["trials"]) + int(trials_value)
+
+        if successes_value is not None:
+            successes_clamped = max(0, min(int(successes_value), int(trials_value)))
+            bucket["weighted_successes"] = float(bucket["weighted_successes"]) + float(successes_clamped)
+            bucket["successes"] = int(bucket["successes"]) + successes_clamped
+        else:
+            asr_clamped = _clamp(asr_value or 0.0, 0.0, 1.0)
+            bucket["weighted_successes"] = float(bucket["weighted_successes"]) + (asr_clamped * float(trials_value))
+            bucket["has_exact_successes"] = False
+
+    summaries: List[ExperimentSummary] = []
+    for exp, payload in aggregates.items():
+        trials_total = int(payload["trials"])
+        weighted_successes = float(payload["weighted_successes"])
+        has_exact_successes = bool(payload.get("has_exact_successes", False))
+        if not has_exact_successes:
+            successes_total: Optional[int] = None
+        else:
+            successes_total = int(payload.get("successes", 0))
+        summaries.append(
+            ExperimentSummary(
+                name=exp,
+                trials=trials_total,
+                weighted_successes=weighted_successes,
+                successes=successes_total,
+            )
+        )
+
+    summaries.sort(key=lambda item: (-item.asr, item.name))
+    return summaries
+
+
+def _compute_overall_asr(experiments: Iterable[ExperimentSummary]) -> Optional[float]:
+    total_trials = 0
+    weighted = 0.0
+    for item in experiments:
+        total_trials += item.trials
+        weighted += item.weighted_successes
+    if total_trials <= 0:
+        return None
+    return (weighted / float(total_trials)) * 100.0
+
+
+def _resolve_timestamp(rows: Iterable[Dict[str, str]]) -> str:
+    latest: Optional[datetime] = None
+    for row in rows:
+        candidate = _parse_iso_timestamp(row.get("run_at", ""))
+        if candidate is None:
+            continue
+        if latest is None or candidate > latest:
+            latest = candidate
+    if latest is None:
+        latest = datetime.now(timezone.utc)
+    return latest.astimezone().isoformat(timespec="seconds")
+
+
+def _collect_modes(rows: Iterable[Dict[str, str]]) -> List[str]:
+    return _dedupe_preserve_order(row.get("mode", "") for row in rows)
+
+
+def _collect_git_commits(rows: Iterable[Dict[str, str]]) -> List[str]:
+    return _dedupe_preserve_order(row.get("git_commit", "") for row in rows)
+
+
+def _collect_experiments(rows: Iterable[Dict[str, str]]) -> List[str]:
+    return _dedupe_preserve_order(row.get("exp", "") for row in rows)
+
+
+def write_run_notes(base_dir: Path, rows: List[Dict[str, str]]) -> None:
+    notes_path = base_dir / "notes.md"
+    notes_path.parent.mkdir(parents=True, exist_ok=True)
+
+    experiments = summarise_experiments(rows)
+    timestamp_text = _resolve_timestamp(rows)
+    seed_tokens = _collect_seed_tokens(rows)
+    mode_tokens = _collect_modes(rows)
+    git_commits = _collect_git_commits(rows)
+    experiment_names = [item.name for item in experiments]
+    if not experiment_names:
+        experiment_names = _collect_experiments(rows)
+
+    exp_summary = ", ".join(experiment_names) if experiment_names else "n/a"
+    mode_summary = ", ".join(mode_tokens) if mode_tokens else "n/a"
+    seed_summary = ", ".join(seed_tokens) if seed_tokens else "n/a"
+
+    run_dir_text = base_dir.resolve().as_posix()
+    git_commit = git_commits[0] if git_commits else ""
+    git_commit_short = git_commit[:8] if git_commit else "n/a"
+
+    total_trials = sum(item.trials for item in experiments)
+    overall_asr = _compute_overall_asr(experiments)
+
+    run_id = base_dir.name or run_dir_text
+    header_exp = exp_summary if exp_summary != "n/a" else "<unknown>"
+    header_mode = mode_summary if mode_summary != "n/a" else "n/a"
+
+    lines: List[str] = []
+    lines.append(f"# Experiment Notes – {header_exp} (mode={header_mode}) – {run_id}")
+    lines.append("")
+    if experiments:
+        lines.append(
+            "This run evaluated {count} experiment(s) across {trials} trials "
+            "using mode(s) {modes} with seeds {seeds}.".format(
+                count=len(experiments),
+                trials=total_trials,
+                modes=mode_summary,
+                seeds=seed_summary,
+            )
+        )
+    else:
+        lines.append("No experiment results were found for this run.")
+    lines.append("")
+
+    lines.append("## Run metadata")
+    lines.append("")
+    lines.append("| Field | Value |")
+    lines.append("| --- | --- |")
+    lines.append(f"| Timestamp | {timestamp_text} |")
+    lines.append(f"| EXP | {exp_summary} |")
+    lines.append(f"| MODE | {mode_summary} |")
+    lines.append(f"| TRIALS | {total_trials} |")
+    lines.append(f"| SEEDS | {seed_summary} |")
+    lines.append(f"| RUN_DIR | {run_dir_text} |")
+    lines.append(f"| GIT_COMMIT | {git_commit_short} |")
+    lines.append("")
+
+    if experiments:
+        lines.append("## Results")
+        lines.append("")
+        lines.append("| Experiment | Trials | Successes | Trial-weighted ASR % |")
+        lines.append("| --- | ---: | ---: | ---: |")
+        for item in experiments:
+            successes_display = str(item.successes) if item.successes is not None else "–"
+            lines.append(
+                "| {name} | {trials} | {successes} | {asr:.2f} |".format(
+                    name=item.name,
+                    trials=item.trials,
+                    successes=successes_display,
+                    asr=item.asr_percent,
+                )
+            )
+        lines.append("")
+    else:
+        lines.append("## Results")
+        lines.append("")
+        lines.append("No aggregated results were available.")
+        lines.append("")
+
+    if overall_asr is None:
+        overall_text = "n/a"
+    else:
+        overall_text = f"{overall_asr:.2f}%"
+    lines.append(f"**Overall trial-weighted ASR:** {overall_text}")
+    lines.append("")
+
+    summary_csv = base_dir / "summary.csv"
+    summary_svg = base_dir / "summary.svg"
+    summary_png = base_dir / "summary.png"
+
+    lines.append("## Artifacts")
+    lines.append("")
+    if summary_csv.exists():
+        lines.append(f"- [summary.csv]({summary_csv.name})")
+    else:
+        lines.append("- summary.csv (missing)")
+    if summary_svg.exists():
+        lines.append(f"- [summary.svg]({summary_svg.name})")
+    if summary_png.exists():
+        lines.append(f"- [summary.png]({summary_png.name})")
+
+    jsonl_paths = sorted(base_dir.rglob("*.jsonl"))
+    if jsonl_paths:
+        lines.append("- Per-seed logs:")
+        for path in jsonl_paths:
+            try:
+                rel = path.relative_to(base_dir)
+            except ValueError:
+                rel = path
+            rel_text = rel.as_posix()
+            lines.append(f"  - [{rel_text}]({rel_text})")
+    else:
+        lines.append("- No per-seed logs were found.")
+
+    chart_path: Optional[Path] = None
+    if summary_svg.exists():
+        chart_path = summary_svg
+    elif summary_png.exists():
+        chart_path = summary_png
+
+    if chart_path is not None:
+        lines.append("")
+        lines.append(f"![Trial-weighted ASR chart]({chart_path.name})")
+
+    lines.append("")
+    notes_path.write_text("\n".join(lines), encoding="utf-8")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Aggregate DoomArena run outputs")
     parser.add_argument(
@@ -299,6 +628,7 @@ def main() -> None:
 
     write_summary(summary_path, combined_rows)
     write_summary_md(base_dir, combined_rows)
+    write_run_notes(base_dir, combined_rows)
 
 
 if __name__ == "__main__":
