@@ -5,7 +5,7 @@ _Demo-first companion to ServiceNow/DoomArena. Build tiny, repeatable agent secu
 ## Why this exists
 Teams need **fast iteration** and **CI-friendly artifacts** to reason about agent risks in context. DoomArena-Lab gives you:
 - **Modes**: **SHIM** (simulation adapters) now; **REAL** (upstream DoomArena adapters) when available, with SHIM fallback.
-- **Make UX**: `make demo`, `make xsweep CONFIG=...`, `make report`, `make latest`.
+- **Make UX**: `make demo`, `make xsweep CONFIG=...`, `make report`, `make latest`, `make open-artifacts`.
 - **Artifacts**: Timestamped run dirs under `results/<RUN_DIR>/` with `summary.csv`, `summary.svg`, and (when produced) per-seed JSONL traces.
 - **Metrics/plots**: **Trial-weighted** micro-average ASR in a grouped-bar chart.
 
@@ -18,7 +18,8 @@ make demo
 make report
 
 # 3) Inspect the most recent artifacts (SVG/CSV)
-ls results/LATEST
+make open-artifacts
+# (prints the SVG/CSV paths; also opens them on macOS/Linux)
 ```
 
 Use a specific config:
@@ -62,8 +63,9 @@ results/
 ## Make targets (TL;DR)
 - `make demo` — tiny SHIM sweep to produce a minimal `results/<RUN_DIR>/`.
 - `make xsweep CONFIG=...` — run a configurable sweep.
-- `make report` — asserts `summary.csv` & `summary.svg`; updates `results/LATEST`.
-- `make latest` — prints the run ID pointed to by `results/LATEST` (if present).
+- `make report` — asserts `summary.csv` & `summary.svg`; refreshes `results/LATEST`.
+- `make latest` — refreshes/prints the newest run linked from `results/LATEST`.
+- `make open-artifacts` — ensures `results/LATEST` is set, then prints (and opens) the latest SVG/CSV.
 
 ## CI
 The smoke workflow runs a tiny SHIM sweep and publishes artifacts. It also updates `results/LATEST` for quick inspection in PRs.
