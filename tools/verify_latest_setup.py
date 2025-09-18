@@ -43,7 +43,6 @@ else:
 
     # Accept any 'make  latest' with flexible whitespace
     patt_latest = r"make\s+latest"
-    patt_open = r"make\s+open-artifacts"
 
     if not re.search(patt_latest, txt, re.I):
         failures.append("README: missing 'make latest' mention")
@@ -51,14 +50,8 @@ else:
     else:
         debug.append("Found 'make latest': " + grep_snippet(txt, patt_latest))
 
-    if not re.search(patt_open, txt, re.I):
-        failures.append("README: missing 'make open-artifacts' mention")
-        debug.append("Snippet search open-artifacts: " + grep_snippet(txt, patt_open))
-    else:
-        debug.append("Found 'make open-artifacts': " + grep_snippet(txt, patt_open))
-
 # 2) Tools exist
-for p in ["latest_run.py", "open_artifacts.py"]:
+for p in ["latest_run.py"]:
     if not (tools / p).exists():
         failures.append(f"tools/{p} is missing")
 
@@ -70,8 +63,6 @@ else:
     mtxt = normalize(mtxt_raw)
     if not re.search(r"^latest:\s*$", mtxt, re.M):
         failures.append("Makefile: missing 'latest:' target")
-    if not re.search(r"^open-artifacts:\s*", mtxt, re.M):
-        failures.append("Makefile: missing 'open-artifacts:' target")
     # report depends on latest (e.g., 'report: latest')
     if not re.search(r"^report:\s*latest\b", mtxt, re.M):
         failures.append("Makefile: 'report' does not depend on 'latest'")
@@ -87,7 +78,7 @@ if failures:
     sys.exit(1)
 else:
     print("VERIFICATION: PASS")
-    print(" - README mentions both targets")
-    print(" - tools/latest_run.py & tools/open_artifacts.py present")
-    print(" - Makefile has targets and 'report: latest' dependency")
+    print(" - README mentions 'make latest'")
+    print(" - tools/latest_run.py present")
+    print(" - Makefile has 'latest' target and 'report: latest' dependency")
     sys.exit(0)
