@@ -5,7 +5,7 @@ _Demo-first companion to ServiceNow/DoomArena. Build tiny, repeatable agent secu
 ## Why this exists
 Teams need **fast iteration** and **CI-friendly artifacts** to reason about agent risks in context. DoomArena-Lab gives you:
 - **Modes**: **SHIM** (simulation adapters) now; **REAL** (upstream DoomArena adapters) when available, with SHIM fallback.
-- **Make UX**: `make demo`, `make xsweep CONFIG=...`, `make report`, `make open-artifacts`.
+- **Make UX**: `make demo`, `make xsweep CONFIG=...`, `make report`.
 - **Artifacts**: Timestamped run dirs under `results/<RUN_DIR>/` with `summary.csv`, `summary.svg`, and (when produced) per-seed JSONL traces.
 - **Metrics/plots**: **Trial-weighted** micro-average ASR in a grouped-bar chart.
 
@@ -17,13 +17,13 @@ make demo
 # 2) Validate/report (asserts CSV/SVG exist)
 make report
 
-# 3) Open the most recent artifacts (SVG/CSV)
-make open-artifacts
+# 3) Inspect the most recent artifacts (SVG/CSV under results/LATEST/)
+ls results/LATEST
 ```
 
 Use a specific config:
 ```bash
-make xsweep CONFIG=configs/airline_static_v1.yaml
+make xsweep CONFIG=configs/airline_static_v1/run.yaml
 ```
 
 ### Latest Results (auto)
@@ -63,7 +63,6 @@ results/
 - `make demo` — tiny SHIM sweep to produce a minimal `results/<RUN_DIR>/`.
 - `make xsweep CONFIG=...` — run a configurable sweep.
 - `make report` — asserts `summary.csv` & `summary.svg`; updates `results/LATEST`.
-- `make open-artifacts` — opens `results/LATEST/summary.svg` and `summary.csv`.
 
 ## CI
 The smoke workflow runs a tiny SHIM sweep and publishes artifacts. It also updates `results/LATEST` for quick inspection in PRs.
