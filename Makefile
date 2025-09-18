@@ -72,10 +72,19 @@ test: install demo
 	@test -f results/summary.svg || (echo "missing results/summary.svg" && exit 1)
 	@find results -type f -name '*seed*.jsonl' -print -quit | grep -q . || (echo "no per-seed jsonl files found under results/" && exit 1)
 	@echo "✅ Results schema & artifacts look good."
-	@if [ -x "$(PY)" ]; then \
-	"$(PY)" -m pytest -q; \
+	@RUN_ID="test_$$(date +%s)"; \
+	RUN_DIR="results/$${RUN_ID}"; \
+	mkdir -p "$$RUN_DIR"; \
+	cp -f results/summary.csv "$$RUN_DIR/" 2>/dev/null || true; \
+	cp -f results/summary.svg "$$RUN_DIR/" 2>/dev/null || true; \
+	find results -maxdepth 3 -type f -name '*seed*.jsonl' -exec cp -f {} "$$RUN_DIR/" \; 2>/dev/null || true; \
+	cp -f results/summary.md "$$RUN_DIR/" 2>/dev/null || true; \
+	printf "%s\n" "$$RUN_ID" > results/.run_id; \
+	echo "🧪 Normalized test artifacts into $$RUN_DIR"; \
+	if [ -x "$(PY)" ]; then \
+	  "$(PY)" -m pytest -q; \
 	else \
-	pytest -q; \
+	  pytest -q; \
 	fi
 
 check-schema: venv
