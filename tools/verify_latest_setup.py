@@ -63,8 +63,8 @@ else:
     mtxt = normalize(mtxt_raw)
     if not re.search(r"^latest:\s*$", mtxt, re.M):
         failures.append("Makefile: missing 'latest:' target")
-    # report depends on latest (e.g., 'report: latest')
-    if not re.search(r"^report:\s*latest\b", mtxt, re.M):
+    # report depends on latest (allow other prerequisites too, e.g., 'report: aggregate plot notes latest')
+    if not re.search(r"^report:\s*.*\blatest\b", mtxt, re.M):
         failures.append("Makefile: 'report' does not depend on 'latest'")
 
 if failures:
