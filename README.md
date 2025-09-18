@@ -52,16 +52,24 @@ RUN_ID=$(make latest)
 ls results/$RUN_ID
 ```
 
-### Swapping to real DoomArena classes
+### Running with real DoomArena (optional)
 
-This repo currently uses thin adapters to mirror DoomArena concepts:
+Runs default to the SHIM adapters. When the `doomarena` package is installed locally the runner automatically switches to the real DoomArena / τ-Bench classes whenever `MODE=REAL` is requested; otherwise it prints a warning and falls back to the shim adapters so CI and local demos continue to work.
 
-| Lab adapter | DoomArena concept (target) |
-| --- | --- |
-| `adapters.attacks.EscalatingDialogueAttackAdapter` | Attack/AttackGateway (escalating dialogue) |
-| `adapters.filters.OutOfPolicyRefundFilter` | Success predicate / policy filter |
+1. Install the real adapters (if you have access):
 
-**Next step:** replace these adapters with the real DoomArena/τ-Bench classes and keep the same CLI + JSONL outputs so experiment configs remain unchanged.
+   ```bash
+   pip install doomarena
+   ```
+
+2. Launch a run in REAL mode (falls back to SHIM if imports fail):
+
+   ```bash
+   make real1
+   make xsweep MODE=REAL CONFIG=configs/airline_escalating_v1/exp.yaml
+   ```
+
+   You can also set `DOOMARENA_MODE=REAL` in the environment instead of passing `MODE` on the CLI.
 
 ## Results
 
@@ -77,7 +85,7 @@ with more trials carry proportionally more weight in the chart.
 
 ![Results summary](results/summary.svg)
 
-# Experiment summary — 2025-09-16T19:31:21+00:00
+# Experiment summary — 2025-09-18T10:53:03+00:00
 
 - Experiments: 2
 - Total trials: 12
@@ -114,9 +122,9 @@ Use `make check-schema` to verify the file matches the expected schema.
 
 |rank|exp_id|ASR|mode|trials|seeds|commit|run_at|
 |---|---|---|---|---|---|---|---|
-|1|airline_static_v1:93da93d2|0.333|SHIM|3|12,11|6048d3b|2025-09-16T19:31:19.911401+00:00|
-|2|airline_static_v1:93da93d2|0.333|SHIM|3|11,12|6048d3b|2025-09-16T19:31:19.676163+00:00|
-|3|airline_escalating_v1:3762657d|0.333|SHIM|3|12|6048d3b|2025-09-16T19:31:19.265401+00:00|
-|4|airline_escalating_v1:3762657d|0.333|SHIM|3|11|6048d3b|2025-09-16T19:31:19.016015+00:00|
+|1|airline_static_v1:93da93d2|0.333|SHIM|3|12,11|21fd63e|2025-09-18T10:53:01.330519+00:00|
+|2|airline_static_v1:93da93d2|0.333|SHIM|3|11,12|21fd63e|2025-09-18T10:53:01.153808+00:00|
+|3|airline_escalating_v1:3762657d|0.333|SHIM|3|12|21fd63e|2025-09-18T10:53:00.634317+00:00|
+|4|airline_escalating_v1:3762657d|0.333|SHIM|3|11|21fd63e|2025-09-18T10:53:00.453650+00:00|
 <!-- TOPN:END -->
 
