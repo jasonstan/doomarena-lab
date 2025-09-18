@@ -33,6 +33,8 @@ endif
 endif
 RUN_DIR := $(RESULTS_DIR)/$(RUN_ID)
 
+LATEST_STRICT ?= 0
+
 TRIALS_ARG :=
 TRIALS_OVERRIDE :=
 ifneq ($(origin TRIALS), file)
@@ -196,6 +198,13 @@ ci: install
 	$(MAKE) xsweep MODE=SHIM TRIALS=3 SEEDS=41,42 RUN_ID=$(RUN_ID)
 	$(MAKE) report RUN_ID=$(RUN_ID)
 
+.PHONY: latest
+latest:
+	@$(PYTHON) tools/latest_run.py $(RESULTS_DIR) $(LATEST_LINK) || true
+
+.PHONY: open-artifacts
+open-artifacts: latest
+	@$(PYTHON) tools/open_artifacts.py
 .PHONY: latest
 latest:
 	@$(PYTHON) tools/latest_run.py $(RESULTS_DIR) $(LATEST_LINK) || true
