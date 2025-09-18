@@ -159,13 +159,12 @@ notes:
 		python scripts/aggregate_results.py --outdir "$(RUN_DIR)"; \
 	fi
 
-report: aggregate plot notes
+report: latest aggregate plot notes
 	mkdir -p results
 	cp -f "$(RUN_DIR)/summary.csv" results/summary.csv
 	cp -f "$(RUN_DIR)/summary.svg" results/summary.svg
 	cp -f "$(RUN_DIR)/summary.md" results/summary.md
 	cp -f "$(RUN_DIR)/notes.md" results/notes.md 2>/dev/null || true
-	printf "%s\n" "$(RUN_ID)" > $(RUN_LATEST)
 	rm -f $(RUN_CURRENT)
 	if [ -x "$(PY)" ]; then \
 		"$(PY)" scripts/update_readme_results.py; \
@@ -194,10 +193,24 @@ ci: install
 	$(MAKE) xsweep MODE=SHIM TRIALS=3 SEEDS=41,42 RUN_ID=$(RUN_ID)
 	$(MAKE) report RUN_ID=$(RUN_ID)
 
-.PHONY: latest
+.PHONY: latest open-artifacts verify-latest-setup
 latest:
-	@if [ -f $(RUN_LATEST) ]; then \
-		cat $(RUN_LATEST); \
+	@if [ -x "$(PY)" ]; then \
+		RUN_ID="$(RUN_ID)" "$(PY)" tools/latest_run.py; \
 	else \
-		echo "No published run."; \
+		RUN_ID="$(RUN_ID)" python tools/latest_run.py; \
+	fi
+
+open-artifacts:
+	@if [ -x "$(PY)" ]; then \
+		RUN_ID="$(RUN_ID)" "$(PY)" tools/open_artifacts.py; \
+	else \
+		RUN_ID="$(RUN_ID)" python tools/open_artifacts.py; \
+	fi
+
+verify-latest-setup:
+	@if [ -x "$(PY)" ]; then \
+		"$(PY)" tools/verify_latest_setup.py; \
+	else \
+		python tools/verify_latest_setup.py; \
 	fi
