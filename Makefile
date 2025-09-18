@@ -2,6 +2,10 @@
 
 SHELL := /bin/bash
 
+RESULTS_DIR ?= results
+LATEST_LINK ?= $(RESULTS_DIR)/LATEST
+PYTHON ?= python3
+
 VENV := .venv
 PY   := $(VENV)/bin/python
 PIP  := $(VENV)/bin/pip
@@ -21,14 +25,13 @@ MODE_OVERRIDE := $(MODE)
 endif
 
 RUN_ID ?= $(shell date -u "+%Y%m%d-%H%M%S")
-RUN_CURRENT := results/.run_id
-RUN_LATEST := results/LATEST
+RUN_CURRENT := $(RESULTS_DIR)/.run_id
 ifeq ($(origin RUN_ID), file)
 ifneq ($(wildcard $(RUN_CURRENT)),)
 RUN_ID := $(shell cat $(RUN_CURRENT))
 endif
 endif
-RUN_DIR := results/$(RUN_ID)
+RUN_DIR := $(RESULTS_DIR)/$(RUN_ID)
 
 TRIALS_ARG :=
 TRIALS_OVERRIDE :=
@@ -79,7 +82,7 @@ test: install demo
 	cp -f results/summary.svg "$$RUN_DIR/" 2>/dev/null || true; \
 	find results -maxdepth 3 -type f -name '*seed*.jsonl' -exec cp -f {} "$$RUN_DIR/" \; 2>/dev/null || true; \
 	cp -f results/summary.md "$$RUN_DIR/" 2>/dev/null || true; \
-	printf "%s\n" "$$RUN_ID" > results/.run_id; \
+	printf "%s\n" "$$RUN_ID" > "$(RUN_CURRENT)"; \
 	printf '🧪 Normalized test artifacts into %s\n' "$$RUN_DIR"; \
 	if [ -x "$(PY)" ]; then \
 	  "$(PY)" -m pytest -q; \
@@ -160,16 +163,16 @@ notes:
 	fi
 
 report: aggregate plot notes
-	mkdir -p results
-	cp -f "$(RUN_DIR)/summary.csv" results/summary.csv
-	cp -f "$(RUN_DIR)/summary.svg" results/summary.svg
-	cp -f "$(RUN_DIR)/summary.md" results/summary.md
-	cp -f "$(RUN_DIR)/notes.md" results/notes.md 2>/dev/null || true
-	printf "%s\n" "$(RUN_ID)" > $(RUN_LATEST)
+	mkdir -p "$(RESULTS_DIR)"
+	cp -f "$(RUN_DIR)/summary.csv" "$(RESULTS_DIR)/summary.csv"
+	cp -f "$(RUN_DIR)/summary.svg" "$(RESULTS_DIR)/summary.svg"
+	cp -f "$(RUN_DIR)/summary.md" "$(RESULTS_DIR)/summary.md"
+	cp -f "$(RUN_DIR)/notes.md" "$(RESULTS_DIR)/notes.md" 2>/dev/null || true
 	rm -f $(RUN_CURRENT)
+	$(PYTHON) tools/latest_run.py "$(RESULTS_DIR)" "$(LATEST_LINK)"
 	if [ -x "$(PY)" ]; then \
-		"$(PY)" scripts/update_readme_results.py; \
-		"$(PY)" scripts/update_readme_topn.py; \
+	        "$(PY)" scripts/update_readme_results.py; \
+	        "$(PY)" scripts/update_readme_topn.py; \
 	else \
 		python scripts/update_readme_results.py; \
 		python scripts/update_readme_topn.py; \
@@ -196,8 +199,9 @@ ci: install
 
 .PHONY: latest
 latest:
-	@if [ -f $(RUN_LATEST) ]; then \
-		cat $(RUN_LATEST); \
-	else \
-		echo "No published run."; \
-	fi
+	@$(PYTHON) tools/latest_run.py "$(RESULTS_DIR)" "$(LATEST_LINK)"
+
+.PHONY: open-artifacts
+open-artifacts:
+	@$(PYTHON) tools/latest_run.py "$(RESULTS_DIR)" "$(LATEST_LINK)" || true
+	@$(PYTHON) tools/open_artifacts.py
