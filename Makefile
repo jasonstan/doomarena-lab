@@ -80,7 +80,7 @@ test: install demo
 	find results -maxdepth 3 -type f -name '*seed*.jsonl' -exec cp -f {} "$$RUN_DIR/" \; 2>/dev/null || true; \
 	cp -f results/summary.md "$$RUN_DIR/" 2>/dev/null || true; \
 	printf "%s\n" "$$RUN_ID" > results/.run_id; \
-	echo "🧪 Normalized test artifacts into $$RUN_DIR"; \
+	printf '🧪 Normalized test artifacts into %s\n' "$$RUN_DIR"; \
 	if [ -x "$(PY)" ]; then \
 	  "$(PY)" -m pytest -q; \
 	else \
