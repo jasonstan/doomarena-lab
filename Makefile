@@ -85,8 +85,15 @@ run:
 	. .venv/bin/activate && python scripts/run_batch.py --exp $(EXP) --seeds "$(SEED)" --trials $(TRIALS) --mode $(MODE) --outdir "$(RUN_DIR)"
 	printf "%s\n" "$(RUN_ID)" > $(RUN_CURRENT)
 
+.ONESHELL: xrun
 xrun:
-	. .venv/bin/activate && python scripts/run_experiment.py --config $(CONFIG) --seed $(SEED) --outdir "$(RUN_DIR)"
+	if [ -x "$(PY)" ]; then PYTHON_BIN="$(PY)"; else PYTHON_BIN="python"; fi; \
+	CMD="$$PYTHON_BIN scripts/run_experiment.py --config $(CONFIG) --seed $(SEED) --outdir \"$(RUN_DIR)\""; \
+	if [ -n "$(MODE_OVERRIDE)" ]; then CMD="$$CMD --mode $(MODE_OVERRIDE)"; fi; \
+	if [ -n "$(TRIALS_OVERRIDE)" ]; then CMD="$$CMD --trials $(TRIALS_OVERRIDE)"; fi; \
+	if [ -n "$(EXP_OVERRIDE)" ]; then CMD="$$CMD --exp $(EXP_OVERRIDE)"; fi; \
+	echo "xrun: $$CMD"; \
+	eval $$CMD; rc=$$?; if [ $$rc -ne 0 ]; then exit $$rc; fi; \
 	printf "%s\n" "$(RUN_ID)" > $(RUN_CURRENT)
 
 sweep:
