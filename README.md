@@ -73,7 +73,7 @@ Runs default to the SHIM adapters. When the `doomarena` package is installed loc
 
 ## Results
 
-Each sweep writes JSONL files under `results/<RUN_ID>/` where `<RUN_ID>` is a UTC timestamp in the form `YYYYmmdd-HHMMSS`. Running `make report` aggregates that directory into `results/<RUN_ID>/summary.csv`, `summary.svg`, and `summary.md`, then publishes copies to `results/summary.*` for backwards compatibility. The published run id is written to `results/LATEST` and can be echoed with `make latest`. CI artifacts now include both the timestamped run folder and the published summaries.
+Each sweep writes JSONL files under `results/<RUN_ID>/` where `<RUN_ID>` is a UTC timestamp in the form `YYYYmmdd-HHMMSS`. Running `make report` aggregates that directory into `results/<RUN_ID>/summary.csv`, `summary.svg`, and `summary.md`, then publishes copies to `results/summary.*` for backwards compatibility. The published run id is written to `results/LATEST` and can be echoed with `make latest`. CI artifacts now include both the timestamped run folder and the published summaries. Each run now writes `${RUN_DIR}/notes.md` with a human-readable summary and chart.
 
 ### Results plot
 
