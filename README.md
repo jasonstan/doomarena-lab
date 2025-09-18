@@ -1,130 +1,78 @@
-[![smoke](https://github.com/jasonstan/doomarena-lab/actions/workflows/smoke.yml/badge.svg?branch=main)](https://github.com/jasonstan/doomarena-lab/actions/workflows/smoke.yml)
+# DoomArena-Lab
 
-# doomarena-lab
+_Demo-first companion to ServiceNow/DoomArena. Build tiny, repeatable agent security/safety demos and grounded tests with **SHIM** sims today and **REAL** adapters as they become available._
 
-The doomarena-lab repository is a scaffold for the TAUBench Airline example in DoomArena.
+## Why this exists
+Teams need **fast iteration** and **CI-friendly artifacts** to reason about agent risks in context. DoomArena-Lab gives you:
+- **Modes**: **SHIM** (simulation adapters) now; **REAL** (upstream DoomArena adapters) when available, with SHIM fallback.
+- **Make UX**: `make demo`, `make xsweep CONFIG=...`, `make report`, `make open-artifacts`.
+- **Artifacts**: Timestamped run dirs under `results/<RUN_DIR>/` with `summary.csv`, `summary.svg`, and (when produced) per-seed JSONL traces.
+- **Metrics/plots**: **Trial-weighted** micro-average ASR in a grouped-bar chart.
 
-## Experiments
-- Use `make scaffold` once to create folders.
-- Edit config at `configs/airline_escalating_v1/run.yaml`.
-- Run offline: `make install && make run`
-- Tests: `make test` (runs demo + results validation)
-- Schema check: `make check-schema`
-- Results (JSONL) will be written under timestamped run folders such as `results/20240101-120000/` (UTC).
-
-### Quickstart (experiments)
-
+## Quick Start
 ```bash
-# 3 seeds, 5 trials each (shim)
-make sweep3
-head -5 results/summary.csv
-# plots
-make plot
-# try REAL (requires permissions), otherwise falls back:
-make real1
-```
-
-## Testing
-
-`make test` runs `make demo` to regenerate sample results, then validates the artifacts:
-
-- `results/summary.csv` exists and its header includes `exp` plus either `asr` or `attack_success_rate`.
-- `results/summary.svg` exists as the aggregate plot.
-- At least one per-seed `*seed*.jsonl` file is present under `results/`.
-
-### Quick Demo (compare two experiments)
-
-```bash
-make install
+# 1) Run a tiny SHIM sweep
 make demo
-open results/summary.svg   # or download from CI artifacts on the PR
-```
 
-This runs airline_escalating_v1 and airline_static_v1 in SHIM mode with two seeds × three trials. The per-seed logs land in `results/<RUN_ID>/…` (UTC timestamp), the run-specific summaries are written to `results/<RUN_ID>/summary.*`, and `make report` publishes copies to `results/summary.*` for quick inspection.
-
-### Run an experiment
-
-```bash
-make xsweep CONFIG=configs/airline_escalating_v1/exp.yaml
+# 2) Validate/report (asserts CSV/SVG exist)
 make report
-head -5 results/summary.csv
-RUN_ID=$(make latest)
-ls results/$RUN_ID
+
+# 3) Open the most recent artifacts (SVG/CSV)
+make open-artifacts
 ```
 
-### Running with real DoomArena (optional)
-
-Runs default to the SHIM adapters. When the `doomarena` package is installed locally the runner automatically switches to the real DoomArena / τ-Bench classes whenever `MODE=REAL` is requested; otherwise it prints a warning and falls back to the shim adapters so CI and local demos continue to work.
-
-1. Install the real adapters (if you have access):
-
-   ```bash
-   pip install doomarena
-   ```
-
-2. Launch a run in REAL mode (falls back to SHIM if imports fail):
-
-   ```bash
-   make real1
-   make xsweep MODE=REAL CONFIG=configs/airline_escalating_v1/exp.yaml
-   ```
-
-   You can also set `DOOMARENA_MODE=REAL` in the environment instead of passing `MODE` on the CLI.
-
-## Results
-
-Each sweep writes JSONL files under `results/<RUN_ID>/` where `<RUN_ID>` is a UTC timestamp in the form `YYYYmmdd-HHMMSS`. Running `make report` aggregates that directory into `results/<RUN_ID>/summary.csv`, `summary.svg`, and `summary.md`, then publishes copies to `results/summary.*` for backwards compatibility. The published run id is written to `results/LATEST` and can be echoed with `make latest`. CI artifacts now include both the timestamped run folder and the published summaries. Each run now writes `${RUN_DIR}/notes.md` with a human-readable summary and chart.
-
-### Results plot
-
-The grouped ASR bars report the overall attack success rate per experiment as total
-successes divided by total trials (a trial-weighted micro average), so experiments
-with more trials carry proportionally more weight in the chart.
-
-<!-- RESULTS:BEGIN -->
-
-![Results summary](results/summary.svg)
-
-# Experiment summary — 2025-09-18T10:53:03+00:00
-
-- Experiments: 2
-- Total trials: 12
-- Total successes: 4
-- Micro-average ASR: 33.3%
-
-The bar chart below shows trial-weighted attack success rates per experiment (micro-averaged by trials).
-
-![ASR summary](summary.svg)
-
-| Experiment | Trials | Successes | ASR (%) |
-| --- | --- | --- | --- |
-| airline_escalating_v1 | 6 | 2 | 33.3% |
-| airline_static_v1 | 6 | 2 | 33.3% |
-
----
-
-*How this was generated:* Run `make xsweep …` followed by `make report` to reproduce these notes.
-
-<!-- RESULTS:END -->
-
-### Results schema
-
-Each run writes execution metadata next to its JSONL log (for example `results/<exp>/<exp>_seed42.meta.json`). `results/summary.csv` includes these fields and is locked to the following header (order matters):
-
-```
-exp_id,exp,config,cfg_hash,mode,seeds,trials,successes,asr,git_commit,run_at
+Use a specific config:
+```bash
+make xsweep CONFIG=configs/airline_static_v1.yaml
 ```
 
-Use `make check-schema` to verify the file matches the expected schema.
+### Latest Results (auto)
+The newest successful run is symlinked to `results/LATEST` (created/updated by `make report`).
 
-<!-- TOPN:BEGIN -->
-## Latest experiments — Top N by ASR
+![Latest results](results/LATEST/summary.svg)
 
-|rank|exp_id|ASR|mode|trials|seeds|commit|run_at|
-|---|---|---|---|---|---|---|---|
-|1|airline_static_v1:93da93d2|0.333|SHIM|3|12,11|21fd63e|2025-09-18T10:53:01.330519+00:00|
-|2|airline_static_v1:93da93d2|0.333|SHIM|3|11,12|21fd63e|2025-09-18T10:53:01.153808+00:00|
-|3|airline_escalating_v1:3762657d|0.333|SHIM|3|12|21fd63e|2025-09-18T10:53:00.634317+00:00|
-|4|airline_escalating_v1:3762657d|0.333|SHIM|3|11|21fd63e|2025-09-18T10:53:00.453650+00:00|
-<!-- TOPN:END -->
+If you see a broken image, run:
+```bash
+make demo && make report
+```
 
+## Results layout
+Each run writes to a timestamped `results/<RUN_DIR>/` directory:
+```
+results/
+  <RUN_DIR>/
+    summary.csv
+    summary.svg
+    ...seed_*.jsonl (optional per-seed traces)
+```
+
+**`summary.csv` schema (minimum fields):**
+- `exp` – experiment name
+- `trials` – number of trials
+- `successes` – number of successful attacks (per definition)
+- `asr` – `successes / trials` (trial-weighted in plots)
+- (plus any extra columns you emit)
+
+**`summary.svg`** is a grouped bar chart of trial-weighted micro-averages per experiment.
+
+## Modes
+- **SHIM** — simulation adapters for quick, deterministic demos.
+- **REAL** — upstream DoomArena adapters when available. The lab falls back to SHIM if REAL is not present.
+
+## Make targets (TL;DR)
+- `make demo` — tiny SHIM sweep to produce a minimal `results/<RUN_DIR>/`.
+- `make xsweep CONFIG=...` — run a configurable sweep.
+- `make report` — asserts `summary.csv` & `summary.svg`; updates `results/LATEST`.
+- `make open-artifacts` — opens `results/LATEST/summary.svg` and `summary.csv`.
+
+## CI
+The smoke workflow runs a tiny SHIM sweep and publishes artifacts. It also updates `results/LATEST` for quick inspection in PRs.
+
+## Roadmap (short)
+- REAL adapter parity with SHIM demos
+- Richer report (markdown/HTML summary, per-exp drill-downs)
+- More configs (domain-targeted scenarios)
+- Perf & stability hardening
+
+## Contributing
+PRs welcome. Keep demos fast and artifacts reproducible. Aim for small, reviewable changes.
