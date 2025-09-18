@@ -30,6 +30,8 @@ endif
 endif
 RUN_DIR := results/$(RUN_ID)
 
+LATEST_STRICT ?= 0
+
 TRIALS_ARG :=
 TRIALS_OVERRIDE :=
 ifneq ($(origin TRIALS), file)
@@ -159,13 +161,13 @@ notes:
 		python scripts/aggregate_results.py --outdir "$(RUN_DIR)"; \
 	fi
 
-report: aggregate plot notes
+report: LATEST_STRICT=1
+report: latest aggregate plot notes
 	mkdir -p results
 	cp -f "$(RUN_DIR)/summary.csv" results/summary.csv
 	cp -f "$(RUN_DIR)/summary.svg" results/summary.svg
 	cp -f "$(RUN_DIR)/summary.md" results/summary.md
 	cp -f "$(RUN_DIR)/notes.md" results/notes.md 2>/dev/null || true
-	printf "%s\n" "$(RUN_ID)" > $(RUN_LATEST)
 	rm -f $(RUN_CURRENT)
 	if [ -x "$(PY)" ]; then \
 		"$(PY)" scripts/update_readme_results.py; \
@@ -196,8 +198,4 @@ ci: install
 
 .PHONY: latest
 latest:
-	@if [ -f $(RUN_LATEST) ]; then \
-		cat $(RUN_LATEST); \
-	else \
-		echo "No published run."; \
-	fi
+	python tools/latest_run.py --results-root results --run-dir "$(RUN_DIR)" --run-id "$(RUN_ID)" $(if $(filter 1 true,$(LATEST_STRICT)),--require,)
