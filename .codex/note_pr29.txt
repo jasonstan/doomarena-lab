@@ -1,0 +1,2 @@
+Sync PR #29 branch with main: ensure bare 'latest:' and 'open-artifacts:' labels,
+keep help target, and align README wording with current behavior.

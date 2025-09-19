@@ -52,7 +52,7 @@ ifneq ($(origin EXP), file)
 EXP_OVERRIDE := $(EXP)
 endif
 
-venv: ## Create local virtualenv
+venv: ## Create local virtualenv in .venv
 	python -m venv $(VENV)
 	$(PY) -m pip install -U pip
 
@@ -192,7 +192,11 @@ latest:
 	@$(PYTHON) tools/latest_run.py $(RESULTS_DIR) $(LATEST_LINK) || true
 
 .PHONY: open-artifacts
-# Open latest summary.svg and summary.csv.
-# Default is print-only (safe in CI). Pass `--open` locally if you want it to launch viewers.
+# Open latest summary.svg and summary.csv (print-only; safe in CI)
 open-artifacts: latest
 	@$(PYTHON) tools/open_artifacts.py --results "$(RESULTS_DIR)/LATEST"
+
+.PHONY: help
+help: ## List common targets and brief docs
+	@echo "DoomArena-Lab — common targets:"; \
+	grep -E '^[a-zA-Z0-9_-]+:.*?## ' $(firstword $(MAKEFILE_LIST)) | sed 's/:.*## / — /' | sort
