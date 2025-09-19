@@ -187,9 +187,12 @@ ci: install
 	$(MAKE) report RUN_ID=$(RUN_ID)
 
 .PHONY: latest
+# Refresh results/LATEST to point at newest valid run (CSV+SVG)
 latest:
 	@$(PYTHON) tools/latest_run.py $(RESULTS_DIR) $(LATEST_LINK) || true
 
 .PHONY: open-artifacts
-open-artifacts: latest
+# Open latest summary.svg and summary.csv (prints paths in CI)
+open-artifacts:
+	@$(MAKE) latest
 	@$(PYTHON) tools/open_artifacts.py
