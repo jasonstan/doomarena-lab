@@ -68,7 +68,7 @@ results/
 - `make demo` — tiny SHIM sweep to produce a minimal `results/<RUN_DIR>/`.
 - `make xsweep CONFIG=...` — run a configurable sweep.
 - `make report` — asserts `summary.csv` & `summary.svg`; refreshes `results/LATEST`.
-- `make latest` — refreshes/prints the newest run linked from `results/LATEST`.
+- `make latest` — refreshes `results/LATEST` to the newest run with `summary.csv` & `summary.svg`.
 - `make open-artifacts` — prints paths to `results/LATEST/summary.svg` and `summary.csv` (safe in CI).  \
   Add `--open` locally to launch files: `python tools/open_artifacts.py --open`.
 
