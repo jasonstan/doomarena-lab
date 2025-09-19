@@ -615,6 +615,16 @@ def main() -> None:
     summary_path = base_dir / "summary.csv"
 
     jsonl_files = sorted(base_dir.rglob("*.jsonl"))
+    if not jsonl_files:
+        parent_dir = base_dir.parent
+        if parent_dir.exists() and parent_dir != base_dir:
+            fallback: List[Path] = []
+            for candidate in parent_dir.rglob("*.jsonl"):
+                try:
+                    candidate.relative_to(base_dir)
+                except ValueError:
+                    fallback.append(candidate)
+            jsonl_files = sorted(fallback)
     new_rows: List[Dict[str, str]] = []
     for path in jsonl_files:
         try:
