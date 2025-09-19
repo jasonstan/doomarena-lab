@@ -1,4 +1,5 @@
 # Project Journal (index)
+- [2025-09-18 — README vision, LATEST wiring, verifier, smoke CI](./2025-09-18.md)
 - [2025-09-16 — CI hardened, reporting UX overhaul, and hygiene upgrades](./2025-09-16.md)
 - [2025-09-15 — Experiment engine v1.2: xsweep, config hashing, CSV aggregation](./2025-09-15.md)
 - [2025-09-14](./2025-09-14.md) — Engine v1/v1.1, DA-shaped shims, SSOT, journal tooling
