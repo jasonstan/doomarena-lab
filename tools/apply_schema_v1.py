@@ -52,12 +52,16 @@ def ensure_schema_column(csv_path: Path) -> None:
 
 def write_run_json(run_dir: Path) -> None:
     run_json = run_dir / "run.json"
-    try:
-        existing = json.loads(run_json.read_text(encoding="utf-8"))
-    except Exception:
-        existing = {}
 
-    existing.update(
+    existing: dict[str, object] = {}
+    if run_json.exists():
+        try:
+            existing = json.loads(run_json.read_text(encoding="utf-8"))
+        except Exception:
+            existing = {}
+
+    out = dict(existing)
+    out.update(
         {
             "results_schema": SCHEMA_VERSION,
             "summary_schema": SCHEMA_VERSION,
@@ -67,7 +71,7 @@ def write_run_json(run_dir: Path) -> None:
         }
     )
 
-    run_json.write_text(json.dumps(existing, indent=2), encoding="utf-8")
+    run_json.write_text(json.dumps(out, indent=2) + "\n", encoding="utf-8")
 
 def main(argv):
     if len(argv) < 2 or argv[1] in ("-h", "--help"):

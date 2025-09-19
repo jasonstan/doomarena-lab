@@ -204,6 +204,43 @@ def main() -> None:
     trials = int(cfg.get("trials", 0))
 
     outdir = Path(args.outdir).expanduser()
+    outdir.mkdir(parents=True, exist_ok=True)
+
+    if str(cfg.get("mode", "SHIM")).upper() == "REAL":
+        try:
+            from adapters.real_client import RealClient
+        except Exception:
+            RealClient = None
+
+        provider = cfg.get("provider", "echo")
+        model = cfg.get("model", "stub")
+        api_key_env = cfg.get("api_key_env", "REAL_API_KEY")
+
+        real_status: Dict[str, Any] = {
+            "provider": provider,
+            "model": model,
+            "api_key_env": api_key_env,
+        }
+        if RealClient is not None:
+            try:
+                rc = RealClient(provider=provider, model=model, api_key_env=api_key_env)
+                real_status.update(rc.healthcheck())
+            except Exception as exc:  # pragma: no cover - defensive guardrail
+                real_status.update({"error": f"{type(exc).__name__}: {exc}"})
+
+        run_json = outdir / "run.json"
+        data: Dict[str, Any] = {}
+        if run_json.exists():
+            try:
+                data = json.loads(run_json.read_text(encoding="utf-8"))
+            except Exception:  # pragma: no cover - tolerate malformed JSON
+                data = {}
+        data.setdefault("results_schema", "1")
+        data.setdefault("summary_schema", "1")
+        data["mode"] = "REAL"
+        data["real"] = real_status
+        run_json.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
     results_dir = outdir / str(exp)
     jsonl_path = results_dir / f"{exp}_seed{seed}.jsonl"
 

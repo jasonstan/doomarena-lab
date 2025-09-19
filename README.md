@@ -58,7 +58,9 @@ make demo && make report
 
 ## Modes
 - **SHIM** — simulation adapters for quick, deterministic demos.
-- **REAL** — first MVP will integrate a single cloud model via a thin adapter and env-based credentials (manual workflow; optional in CI). The lab falls back to SHIM if REAL is not configured.
+- **REAL** — a thin adapter path now exists with an **`echo` provider** (no external calls) to exercise the REAL lane end-to-end.
+  - Metadata is recorded in `results/<RUN_ID>/run.json` under `.real` (provider/model/key env, healthcheck).
+  - Use **Actions → `run-real-mvp`** to run with `MODE=REAL` (manual, secrets-aware). A true provider can be added next.
 
 ## Policy tags & routing
 - Add `policy: benign|sensitive|prohibited` to each experiment config.
