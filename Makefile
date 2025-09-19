@@ -9,7 +9,7 @@
 #   RUN_ID  ?= (timestamp default)     # results/<RUN_ID>; persisted via results/.run_id
 # ------------------------------------------------------------------------------
 
-.PHONY: venv install test run sweep aggregate report scaffold check-schema plot notes sweep3 real1 xrun xsweep xsweep-all topn demo test-unit ci latest open-artifacts list-runs journal install-tau help vars
+.PHONY: venv install test run sweep aggregate report scaffold check-schema plot notes sweep3 real1 xrun xsweep xsweep-all topn demo test-unit ci latest tidy-run open-artifacts list-runs journal install-tau help vars
 
 SHELL := /bin/bash
 
@@ -200,6 +200,15 @@ ci: install ## CI entrypoint: minimal sweep & report (used in smoke)
 .PHONY: latest
 latest:
 	@$(PYTHON) tools/latest_run.py $(RESULTS_DIR) $(LATEST_LINK) || true
+
+tidy-run: ## Remove redundant files in results/$(RUN_ID) (timestamped copies, PNG)
+	@d="results/$(RUN_ID)"; \
+	if [ -d "$$d" ]; then \
+	  rm -f "$$d"/index_* "$$d"/summary_*.csv "$$d"/summary_*.svg "$$d"/summary_*.md "$$d"/run_*.json "$$d"/summary.png 2>/dev/null || true; \
+	  echo "Tidied $$d"; \
+	else \
+	  echo "No run dir at $$d"; \
+	fi
 
 open-artifacts: latest
 	@$(PYTHON) tools/open_artifacts.py --results "$(RESULTS_DIR)/LATEST"
