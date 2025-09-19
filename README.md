@@ -1,37 +1,33 @@
 # DoomArena-Lab
 
-_Demo-first companion to ServiceNow/DoomArena. Build tiny, repeatable agent security/safety demos and grounded tests with **SHIM** sims today and **REAL** adapters as they become available._
+_DoomArena-Lab is a small, e2e-oriented companion to ServiceNow/DoomArena. It helps teams build **tiny, repeatable demos and grounded tests** with **SHIM** sims today and a clear path to **REAL** adapters (first MVP: one cloud model)._ 
 
 ## Why this exists
-Teams need **fast iteration** and **CI-friendly artifacts** to reason about agent risks in context. DoomArena-Lab gives you:
-- **Modes**: **SHIM** (simulation adapters) now; **REAL** (upstream DoomArena adapters) when available, with SHIM fallback.
-- **Make UX**: `make demo`, `make xsweep CONFIG=...`, `make report`, `make latest`, `make open-artifacts`.
-- **Artifacts**:
-  - Each run produces a timestamped folder under `results/<RUN_ID>/` (canonical files only: `index.html`, `summary.csv/.svg/.md`, `run.json`, `notes.md`, and per-experiment folders).
-  - `results/` also contains convenience “latest” copies for quick viewing.
-  - The `run-demo` action uploads **two artifacts**: `latest-artifacts` and the slimmed full folder `run-<RUN_ID>`.
-- **Metrics/plots**: **Trial-weighted** micro-average ASR in a grouped-bar chart (via a tiny shared helper in `scripts/_lib.py`).
+Teams need **fast iteration** and **CI-friendly artifacts** to reason about agent risks in context—and a simple way to reach a **first REAL MVP**. DoomArena-Lab gives you:
+- **SHIM** — simulation adapters for quick, deterministic demos.
+- **REAL** — upstream DoomArena adapters when available (fallback to SHIM when not).
+- **Artifacts** — timestamped run dirs + “latest” copies; SVG plots embed nicely in PRs.
 
 ## Quick Start
+
+### Option A: One-click in GitHub Actions
+1. Go to **Actions → run-demo → Run workflow** (defaults OK).
+2. When it finishes, download:
+   - **latest-artifacts** (convenience copies), and
+   - **run-<RUN_ID>** (full timestamped folder, canonical files only).
+3. Open `index.html` or drop `summary.svg` into a PR/issue.
+
+### Option B: Local
 ```bash
-# 1) Run a tiny SHIM sweep
-make demo
-
-# 2) Validate/report (asserts CSV/SVG exist); also refreshes results/LATEST
-make report
-
-# 3) Inspect the most recent artifacts (SVG/CSV)
-make open-artifacts
-# (prints the SVG/CSV paths; also opens them on macOS/Linux)
+python3 -m venv .venv && source .venv/bin/activate
+make install
+# SHIM by default:
+make demo && make report && make open-artifacts
+# Or explicitly pin a run id:
+RUN_ID=$(date -u +%Y%m%d-%H%M%S) make demo report
 ```
 
-Use a specific config:
-```bash
-make xsweep CONFIG=configs/airline_static_v1/run.yaml
-```
-
-**No local tools? Use the cloud:**
-- **Actions** → **run-demo** → **Run workflow** → download **latest-artifacts** → open `index.html`.
+Prefer one command? Run `make quickstart` for `install → demo → report → open-artifacts`.
 
 ### Latest Results (auto)
 The newest successful run is symlinked to `results/LATEST` (created/updated by `make report`).
@@ -43,18 +39,12 @@ If you see a broken image, run:
 make demo && make report
 ```
 
-## Results layout
-Each run writes to a timestamped `results/<RUN_DIR>/` directory:
-```
-results/
-  <RUN_DIR>/
-    run.json
-    summary.csv
-    summary.svg
-    ...seed_*.jsonl (optional per-seed traces)
-```
+## Artifacts & schema
+- Each run writes to `results/<RUN_ID>/`; convenience copies go to `results/LATEST/*`.
+- Canonical files in `results/<RUN_ID>/`: `index.html`, `summary.csv`, `summary.svg`, `summary.md`, `run.json`, `notes.md`, plus per-experiment subfolders.
+- CSV includes `summary_schema: 1`; run metadata includes `results_schema: 1`.
+- The `run-demo` GitHub Action uploads **latest-artifacts** for quick inspection and a slimmed `run-<RUN_ID>` folder for pinned references.
 
-**Schemas**: each run writes a `run.json` declaring `results_schema` / `summary_schema` (currently `"1"`), and `summary.csv` includes a `schema` column. Bump when columns or semantics change.
 **Thresholds (optional):** declare guardrails in `thresholds.yaml` (`min_trials`, `max_asr`, `min_asr`). CI posts a PASS/WARN/FAIL table on each PR (warn-only by default). Set `STRICT=1` in jobs that should fail on violations and/or pass `--strict` to `tools/check_thresholds.py`.
 
 **`summary.csv` schema (minimum fields):**
@@ -68,39 +58,36 @@ results/
 
 ## Modes
 - **SHIM** — simulation adapters for quick, deterministic demos.
-- **REAL** — upstream DoomArena adapters when available. The lab falls back to SHIM if REAL is not present.
+- **REAL** — first MVP will integrate a single cloud model via a thin adapter and env-based credentials (manual workflow; optional in CI). The lab falls back to SHIM if REAL is not configured.
 
 ## Make targets (TL;DR)
 - `make help` — list common targets & docs.
-- `make demo` — tiny SHIM sweep to produce a minimal `results/<RUN_DIR>/`.
+- `make demo` — tiny sweep (defaults to SHIM) producing `results/<RUN_ID>/`.
 - `make xsweep CONFIG=...` — run a configurable sweep.
-## Make targets (TL;DR)
-- `make help` — list common targets & docs.
-- `make demo` — tiny SHIM sweep to produce a minimal `results/<RUN_DIR>/`.
-- `make xsweep CONFIG=...` — run a configurable sweep.
-- `make report` — asserts `summary.csv` & `summary.svg`; updates `results/LATEST`.
-- `make latest` — refreshes `results/LATEST` to the newest run with `summary.csv` & `summary.svg`.
-- `make open-artifacts` — prints paths to `results/LATEST/summary.svg` and `summary.csv` (safe in CI). Add `--open` locally to launch files: `python tools/open_artifacts.py --open`.
+- `make report` — asserts `summary.csv`/`summary.svg`; updates `results/LATEST`.
+- `make latest` — refreshes `results/LATEST` to the newest valid run.
+- `make open-artifacts` — opens `results/LATEST/summary.svg` and `summary.csv`.
+- `make list-runs` — list timestamped run folders with quick validity flags.
+- `make tidy-run RUN_ID=...` — remove redundant files in a run folder (keeps canonical ones).
+- `make quickstart` — `install → demo → report → open-artifacts`.
 
 ## Docs
 - [Architecture](docs/ARCHITECTURE.md) — data flow, contracts, schemas, CI
 - [Experiments](docs/EXPERIMENTS.md) — add/run configs, thresholds, tips
 
 ### Testing
-- ✅ `make test-unit` — runs fast unit tests inside `.venv`
-- ✅ `make test` — runs all tests inside `.venv`
-- ✅ `make demo` — auto-installs deps (`pyyaml`, `pandas`, `matplotlib`, etc.)
-- ✅ `make report`
-> All targets ensure a local `.venv` is created and dependencies are installed.
+✅ `pytest tests/test_lib.py -q` — shared helper unit tests.
+
+✅ `make report` — asserts presence and shape of canonical artifacts.
+
+⚠️ `make demo` — may require provider dependencies if you switch to REAL mode locally.
 
 ## CI
 The smoke workflow runs a tiny SHIM sweep and publishes artifacts. It also updates `results/LATEST` for quick inspection in PRs.
 
 ## Roadmap (short)
-- REAL adapter parity with SHIM demos
+- REAL MVP (priority): thin client + MODE=REAL lane for one config, manual Action run-real-mvp, env-based credentials, safe defaults (low trials/seeds).
 - Richer report (markdown/HTML summary, per-exp drill-downs)
-- More configs (domain-targeted scenarios)
-- Perf & stability hardening
 
 ## Contributing
 PRs welcome. Keep demos fast and artifacts reproducible. Aim for small, reviewable changes.
