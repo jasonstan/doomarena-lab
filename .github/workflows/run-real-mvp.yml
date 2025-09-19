@@ -1,0 +1,84 @@
+name: run-real-mvp
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: "Provider id (e.g., echo, openai_compat)"
+        required: false
+        default: "echo"
+      model:
+        description: "Model id/name (provider-specific)"
+        required: false
+        default: "stub"
+      trials:
+        description: "Trials per seed"
+        required: false
+        default: "1"
+      seeds:
+        description: "Comma-separated seeds"
+        required: false
+        default: "1"
+permissions:
+  contents: read
+  actions: write
+  id-token: write
+jobs:
+  e2e-real:
+    runs-on: ubuntu-latest
+    env:
+      # Map the API key secret to an env var your adapter will read.
+      # Example: set repository/organization secret REAL_API_KEY before running.
+      REAL_API_KEY: ${{ secrets.REAL_API_KEY }}
+      PROVIDER: ${{ inputs.provider }}
+      MODEL: ${{ inputs.model }}
+      TRIALS: ${{ inputs.trials }}
+      SEEDS: ${{ inputs.seeds }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Set RUN_ID (once)
+        id: set-run-id
+        run: |
+          RUN_ID="$(date -u +%Y%m%d-%H%M%S)"
+          echo "RUN_ID=$RUN_ID" >> "$GITHUB_ENV"
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+          echo "RUN_ID=$RUN_ID"
+      - name: Install
+        run: make install
+      - name: Run REAL demo (same experiments, MODE=REAL)
+        env:
+          RUN_ID: ${{ env.RUN_ID }}
+        run: |
+          # Adapter code will read PROVIDER/MODEL/REAL_API_KEY if it exists.
+          make demo MODE=REAL TRIALS="${TRIALS}" SEEDS="${SEEDS}" RUN_ID="${RUN_ID}"
+      - name: Report + publish LATEST
+        env:
+          RUN_ID: ${{ env.RUN_ID }}
+        run: |
+          make report RUN_ID="${RUN_ID}"
+          make latest
+      - name: Tidy run directory (remove duplicates)
+        env:
+          RUN_ID: ${{ env.RUN_ID }}
+        run: |
+          make tidy-run RUN_ID="${RUN_ID}"
+      - name: Upload full RUN_DIR
+        uses: actions/upload-artifact@v4
+        with:
+          name: run-${{ env.RUN_ID }}
+          path: results/${{ env.RUN_ID }}/
+          if-no-files-found: error
+          retention-days: 7
+      - name: Upload latest artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: latest-artifacts
+          path: |
+            results/LATEST/summary.csv
+            results/LATEST/summary.svg
+            results/LATEST/index.html
+            results/LATEST/run.json
+          if-no-files-found: error
+          retention-days: 7
