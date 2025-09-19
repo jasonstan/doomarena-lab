@@ -26,6 +26,14 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Set RUN_ID (once)
+        id: set-run-id
+        run: |
+          RUN_ID="$(date -u +%Y%m%d-%H%M%S)"
+          echo "RUN_ID=$RUN_ID" >> "$GITHUB_ENV"
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+          echo "RUN_ID=$RUN_ID"
+
       - name: Install
         run: make install
 
@@ -34,27 +42,35 @@ jobs:
           TRIALS: ${{ inputs.trials }}
           SEEDS: ${{ inputs.seeds }}
           MODE: ${{ inputs.mode }}
+          RUN_ID: ${{ env.RUN_ID }}
         run: |
-          make demo TRIALS="${TRIALS}" SEEDS="${SEEDS}" MODE="${MODE}"
+          make demo TRIALS="${TRIALS}" SEEDS="${SEEDS}" MODE="${MODE}" RUN_ID="${RUN_ID}"
 
       - name: Report + publish LATEST
+        env:
+          RUN_ID: ${{ env.RUN_ID }}
         run: |
-          make report
+          make report RUN_ID="${RUN_ID}"
           make latest
 
-      - name: Determine RUN_ID
-        id: rid
+      - name: Add timestamped copies inside run dir
+        env:
+          RUN_ID: ${{ env.RUN_ID }}
         run: |
-          RID="$(cat results/.run_id 2>/dev/null || true)"
-          echo "run_id=$RID" >> "$GITHUB_OUTPUT"
-          echo "RUN_ID=$RID"
+          d="results/${RUN_ID}"
+          test -d "$d" || { echo "Missing $d"; exit 1; }
+          for f in summary.csv summary.svg summary.md index.html run.json; do
+            if [ -f "$d/$f" ]; then
+              cp -f "$d/$f" "$d/${f%.*}_${RUN_ID}.${f##*.}"
+            fi
+          done
 
       - name: Upload full RUN_DIR
-        if: steps.rid.outputs.run_id != ''
+        if: ${{ steps.set-run-id.outputs.run_id != '' }}
         uses: actions/upload-artifact@v4
         with:
-          name: run-${{ steps.rid.outputs.run_id }}
-          path: results/${{ steps.rid.outputs.run_id }}/
+          name: run-${{ env.RUN_ID }}
+          path: results/${{ env.RUN_ID }}/
           if-no-files-found: error
           retention-days: 7
 
