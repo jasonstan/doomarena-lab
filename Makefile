@@ -198,14 +198,12 @@ ci: install ## CI entrypoint: minimal sweep & report (used in smoke)
 	$(MAKE) report RUN_ID=$(RUN_ID)
 
 .PHONY: latest
-latest: ## Refresh results/LATEST to point at newest valid run (CSV+SVG)
+latest:
 	@$(PYTHON) tools/latest_run.py $(RESULTS_DIR) $(LATEST_LINK) || true
 
-.PHONY: open-artifacts
-open-artifacts: latest ## Open latest summary.svg and summary.csv (prints paths in CI)
-	@$(PYTHON) tools/open_artifacts.py
+open-artifacts: latest
+	@$(PYTHON) tools/open_artifacts.py --results "$(RESULTS_DIR)/LATEST"
 
-# --- Developer UX ------------------------------------------------------------
 .PHONY: help
 help: ## List common targets and brief docs
 	@echo "DoomArena-Lab — common targets:"; \

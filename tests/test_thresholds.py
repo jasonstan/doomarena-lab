@@ -13,4 +13,19 @@ def test_evaluate_mixes_warn_and_fail():
     status = {r["exp"]: r["status"] for r in md_rows}
     assert status["a"] == "PASS"
     assert status["b"] == "FAIL"
+    assert worst == 2
+
+
+def test_evaluate_warn_for_min_trials_and_missing():
+    rows = [
+        {"exp": "c", "trials": "1", "successes": "0"},
+    ]
+    th = {
+        "c": {"min_trials": 3},
+        "d": {"min_trials": 1},
+    }
+    md_rows, worst = evaluate(rows, th)
+    status = {r["exp"]: r["status"] for r in md_rows}
+    assert status["c"] == "WARN"
+    assert status["d"] == "WARN"
     assert worst == 1

@@ -72,12 +72,21 @@ def weighted_asr_by_exp(rows: Iterable[Dict[str, str]]) -> Dict[str, float]:
                 continue
         except Exception:
             pass
-        # Otherwise fall back to asr/attack_success_rate * trials=1
+        # Otherwise fall back to asr/attack_success_rate * trials (default weight=1)
         asr = r.get("asr") or r.get("attack_success_rate")
         try:
             a = float(asr)
+            weight = 1.0
+            trials_val = r.get("trials")
+            if trials_val is not None:
+                try:
+                    t = float(trials_val)
+                    if t > 0:
+                        weight = t
+                except Exception:
+                    pass
             S, T = acc.get(exp, (0.0, 0.0))
-            acc[exp] = (S + a, T + 1.0)
+            acc[exp] = (S + (a * weight), T + weight)
         except Exception:
             # skip if unusable
             pass

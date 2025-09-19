@@ -10,8 +10,11 @@ def load_thresholds(path: Path) -> dict:
         return {}
     return yaml.safe_load(path.read_text()) or {}
 
+STATUS_SEVERITY = {"PASS": 0, "WARN": 1, "FAIL": 2}
+
+
 def evaluate(rows: list[dict], th: dict) -> tuple[list[dict], int]:
-    """Return (rows_for_md, worst_exit). exit: 0=ok/warn, 1=fail (STRICT only)."""
+    """Return (rows_for_md, worst_status) where 0=PASS, 1=WARN, 2=FAIL."""
     asr_by_exp = weighted_asr_by_exp(rows)
     trials_by_exp = {}
     for r in rows:
@@ -55,16 +58,19 @@ def evaluate(rows: list[dict], th: dict) -> tuple[list[dict], int]:
             "status": status,
             "reason": "; ".join(reasons) if reasons else "",
         })
-        if status == "FAIL":
-            worst = 1
+        worst = max(worst, STATUS_SEVERITY[status])
 
     # also include experiments present in thresholds but absent in results
     for exp in th.keys():
         if exp not in asr_by_exp:
             md_rows.append({
-                "exp": exp, "asr": float("nan"), "trials": 0,
-                "status": "WARN", "reason": "no data for experiment"
+                "exp": exp,
+                "asr": float("nan"),
+                "trials": 0,
+                "status": "WARN",
+                "reason": "no data for experiment",
             })
+            worst = max(worst, STATUS_SEVERITY["WARN"])
     return md_rows, worst
 
 def to_markdown(rows: list[dict]) -> str:
@@ -78,7 +84,11 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--results", default="results/LATEST", help="path to results directory (default: results/LATEST)")
     ap.add_argument("--thresholds", default="thresholds.yaml", help="path to thresholds.yaml")
-    ap.add_argument("--strict", action="store_true", help="exit non-zero on FAIL")
+    ap.add_argument(
+        "--strict",
+        action="store_true",
+        help="exit non-zero when thresholds are violated (WARN/FAIL)",
+    )
     ap.add_argument("--out", default="", help="optional path to write markdown summary")
     args = ap.parse_args()
 
@@ -93,7 +103,7 @@ def main():
     else:
         print(md)
 
-    if args.strict and worst:
+    if args.strict and worst >= STATUS_SEVERITY["WARN"]:
         return 1
     return 0
 
