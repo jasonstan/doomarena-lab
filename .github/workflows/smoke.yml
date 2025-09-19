@@ -70,3 +70,5 @@ jobs:
             results/summary.csv
             results/summary.svg
             results/summary.md
+            results/run.json
+            results/LATEST/run.json

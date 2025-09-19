@@ -42,10 +42,13 @@ Each run writes to a timestamped `results/<RUN_DIR>/` directory:
 ```
 results/
   <RUN_DIR>/
+    run.json
     summary.csv
     summary.svg
     ...seed_*.jsonl (optional per-seed traces)
 ```
+
+**Schemas**: each run writes a `run.json` declaring `results_schema` / `summary_schema` (currently `"1"`), and `summary.csv` includes a `schema` column. Bump when columns or semantics change.
 
 **`summary.csv` schema (minimum fields):**
 - `exp` – experiment name
