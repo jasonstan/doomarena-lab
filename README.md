@@ -6,7 +6,10 @@ _Demo-first companion to ServiceNow/DoomArena. Build tiny, repeatable agent secu
 Teams need **fast iteration** and **CI-friendly artifacts** to reason about agent risks in context. DoomArena-Lab gives you:
 - **Modes**: **SHIM** (simulation adapters) now; **REAL** (upstream DoomArena adapters) when available, with SHIM fallback.
 - **Make UX**: `make demo`, `make xsweep CONFIG=...`, `make report`, `make latest`, `make open-artifacts`.
-- **Artifacts**: Timestamped run dirs under `results/<RUN_DIR>/` with `summary.csv`, `summary.svg`, and (when produced) per-seed JSONL traces.
+- **Artifacts**:
+  - Each run produces a timestamped folder under `results/<RUN_ID>/` (canonical files only: `index.html`, `summary.csv/.svg/.md`, `run.json`, `notes.md`, and per-experiment folders).
+  - `results/` also contains convenience “latest” copies for quick viewing.
+  - The `run-demo` action uploads **two artifacts**: `latest-artifacts` and the slimmed full folder `run-<RUN_ID>`.
 - **Metrics/plots**: **Trial-weighted** micro-average ASR in a grouped-bar chart (via a tiny shared helper in `scripts/_lib.py`).
 
 ## Quick Start
