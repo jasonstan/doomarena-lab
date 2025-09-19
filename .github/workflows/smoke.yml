@@ -72,3 +72,15 @@ jobs:
             results/summary.md
             results/run.json
             results/LATEST/run.json
+      - name: Upload latest artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: latest-artifacts
+          path: |
+            results/LATEST/summary.csv
+            results/LATEST/summary.svg
+            results/LATEST/run.json
+            results/LATEST/index.html
+          if-no-files-found: error
+          retention-days: 7
