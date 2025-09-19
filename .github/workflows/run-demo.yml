@@ -31,9 +31,8 @@ jobs:
           MODE: ${{ inputs.mode }}
         run: |
           make demo TRIALS="${TRIALS}" SEEDS="${SEEDS}" MODE="${MODE}"
-      - name: Report + publish LATEST
+      - name: Publish LATEST
         run: |
-          make report
           make latest
       - name: Upload latest artifacts
         uses: actions/upload-artifact@v4
