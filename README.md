@@ -27,6 +27,9 @@ Use a specific config:
 make xsweep CONFIG=configs/airline_static_v1/run.yaml
 ```
 
+**No local tools? Use the cloud:**
+- **Actions** → **run-demo** → **Run workflow** → download **latest-artifacts** → open `index.html`.
+
 ### Latest Results (auto)
 The newest successful run is symlinked to `results/LATEST` (created/updated by `make report`).
 

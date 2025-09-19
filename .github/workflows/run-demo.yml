@@ -1,0 +1,49 @@
+name: run-demo
+on:
+  workflow_dispatch:
+    inputs:
+      trials:
+        description: "Trials per seed"
+        required: false
+        default: "3"
+      seeds:
+        description: "Seeds (comma-separated)"
+        required: false
+        default: "11,12"
+      mode:
+        description: "Mode (SHIM or REAL)"
+        required: false
+        default: "SHIM"
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: make install
+      - name: Run demo sweep(s)
+        env:
+          TRIALS: ${{ inputs.trials }}
+          SEEDS: ${{ inputs.seeds }}
+          MODE: ${{ inputs.mode }}
+        run: |
+          make xsweep CONFIG=configs/airline_escalating_v1/run.yaml EXP=airline_escalating_v1 TRIALS="${TRIALS}" SEEDS="${SEEDS}" MODE="${MODE}"
+          make xsweep CONFIG=configs/airline_static_v1/run.yaml     EXP=airline_static_v1     TRIALS="${TRIALS}" SEEDS="${SEEDS}" MODE="${MODE}"
+      - name: Report + publish LATEST
+        run: |
+          make report
+          make latest
+      - name: Upload latest artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: latest-artifacts
+          path: |
+            results/LATEST/summary.csv
+            results/LATEST/summary.svg
+            results/LATEST/index.html
+            results/LATEST/run.json
+          if-no-files-found: error
+          retention-days: 7
