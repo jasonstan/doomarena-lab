@@ -1,6 +1,7 @@
 seed: 42
 trials: 20
 online: false
+policy: benign
 attack:
   type: escalating_dialogue
   levels:

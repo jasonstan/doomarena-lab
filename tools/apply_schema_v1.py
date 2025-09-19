@@ -51,14 +51,23 @@ def ensure_schema_column(csv_path: Path) -> None:
     tmp.replace(csv_path)
 
 def write_run_json(run_dir: Path) -> None:
-    out = {
-        "results_schema": SCHEMA_VERSION,
-        "summary_schema": SCHEMA_VERSION,
-        "run_id": run_dir.name,
-        "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "git": git_info(),
-    }
-    (run_dir / "run.json").write_text(json.dumps(out, indent=2), encoding="utf-8")
+    run_json = run_dir / "run.json"
+    try:
+        existing = json.loads(run_json.read_text(encoding="utf-8"))
+    except Exception:
+        existing = {}
+
+    existing.update(
+        {
+            "results_schema": SCHEMA_VERSION,
+            "summary_schema": SCHEMA_VERSION,
+            "run_id": run_dir.name,
+            "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "git": git_info(),
+        }
+    )
+
+    run_json.write_text(json.dumps(existing, indent=2), encoding="utf-8")
 
 def main(argv):
     if len(argv) < 2 or argv[1] in ("-h", "--help"):

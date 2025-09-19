@@ -60,6 +60,12 @@ make demo && make report
 - **SHIM** — simulation adapters for quick, deterministic demos.
 - **REAL** — first MVP will integrate a single cloud model via a thin adapter and env-based credentials (manual workflow; optional in CI). The lab falls back to SHIM if REAL is not configured.
 
+## Policy tags & routing
+- Add `policy: benign|sensitive|prohibited` to each experiment config.
+- Only `benign` experiments will hit REAL providers by default.
+- Marking a config `policy: sensitive` routes MODE=REAL → SHIM unless you export `ALLOW_SENSITIVE=1`.
+- `policy: prohibited` always runs via SHIM. Each run records the decision in `results/<RUN_ID>/run.json`.
+
 ## Make targets (TL;DR)
 - `make help` — list common targets & docs.
 - `make demo` — tiny sweep (defaults to SHIM) producing `results/<RUN_ID>/`.
