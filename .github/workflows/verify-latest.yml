@@ -15,3 +15,5 @@ jobs:
           python-version: '3.x'
       - name: Run verifier
         run: python tools/verify_latest_setup.py
+      - name: Make help should print
+        run: make help
