@@ -67,6 +67,13 @@ results/
 - `make latest` — refreshes/prints the newest run linked from `results/LATEST`.
 - `make open-artifacts` — ensures `results/LATEST` is set, then prints (and opens) the latest SVG/CSV.
 
+### Testing
+- ✅ `make test-unit` — runs fast unit tests inside `.venv`
+- ✅ `make test` — runs all tests inside `.venv`
+- ✅ `make demo` — auto-installs deps (`pyyaml`, `pandas`, `matplotlib`, etc.)
+- ✅ `make report`
+> All targets ensure a local `.venv` is created and dependencies are installed.
+
 ## CI
 The smoke workflow runs a tiny SHIM sweep and publishes artifacts. It also updates `results/LATEST` for quick inspection in PRs.
 

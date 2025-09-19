@@ -1,0 +1,5 @@
+# Dev/test deps (keep light; match Makefile install)
+pytest
+pyyaml
+pandas
+matplotlib
