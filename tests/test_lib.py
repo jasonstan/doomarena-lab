@@ -46,3 +46,13 @@ def test_weighted_asr_by_exp_weights_trials(tmp_path: Path):
     assert abs(out["a"] - 0.5) < 1e-9
     assert abs(out["b"] - 0.75) < 1e-9
 
+
+def test_weighted_asr_by_exp_fallback_uses_trials(tmp_path: Path):
+    rows = [
+        {"exp": "a", "asr": "0.1", "trials": "10"},
+        {"exp": "a", "asr": "0.5", "trials": "2"},
+    ]
+    _write_csv(tmp_path, rows)
+    out = weighted_asr_by_exp(read_summary(tmp_path / "summary.csv"))
+    assert abs(out["a"] - (0.1 * 10 + 0.5 * 2) / 12) < 1e-9
+
