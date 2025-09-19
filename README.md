@@ -65,11 +65,12 @@ results/
 - **REAL** — upstream DoomArena adapters when available. The lab falls back to SHIM if REAL is not present.
 
 ## Make targets (TL;DR)
+- `make help` — list common targets & docs.
 - `make demo` — tiny SHIM sweep to produce a minimal `results/<RUN_DIR>/`.
 - `make xsweep CONFIG=...` — run a configurable sweep.
-- `make report` — asserts `summary.csv` & `summary.svg`; refreshes `results/LATEST`.
-- `make latest` — refreshes/prints the newest run linked from `results/LATEST`.
-- `make open-artifacts` — ensures `results/LATEST` is set, then prints (and opens) the latest SVG/CSV.
+- `make report` — asserts `summary.csv` & `summary.svg`; updates `results/LATEST`.
+- `make latest` — refreshes `results/LATEST` to the newest run with `summary.csv` & `summary.svg`.
+- `make open-artifacts` — opens `results/LATEST/summary.svg` and `summary.csv`.
 
 ### Testing
 - ✅ `make test-unit` — runs fast unit tests inside `.venv`

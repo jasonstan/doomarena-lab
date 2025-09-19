@@ -1,4 +1,15 @@
-.PHONY: venv install test run sweep aggregate report scaffold check-schema plot notes sweep3 real1 xrun xsweep xsweep-all topn demo test-unit
+# ------------------------------------------------------------------------------
+# DoomArena-Lab Makefile
+# Overridable variables (set via `make VAR=value ...`)
+#   EXP     ?= airline_escalating_v1   # experiment name
+#   TRIALS  ?= 5                       # trials per seed
+#   SEED    ?= 42                      # single-seed runs
+#   SEEDS   ?= 41,42,43                # multi-seed runs
+#   MODE    ?= SHIM                    # SHIM or REAL (falls back to SHIM if REAL not present)
+#   RUN_ID  ?= (timestamp default)     # results/<RUN_ID>; persisted via results/.run_id
+# ------------------------------------------------------------------------------
+
+.PHONY: venv install test run sweep aggregate report scaffold check-schema plot notes sweep3 real1 xrun xsweep xsweep-all topn demo test-unit ci latest open-artifacts journal install-tau help vars
 
 SHELL := /bin/bash
 
@@ -52,7 +63,7 @@ ifneq ($(origin EXP), file)
 EXP_OVERRIDE := $(EXP)
 endif
 
-venv: ## Create local virtualenv
+venv: ## Create local virtualenv in .venv
 	python -m venv $(VENV)
 	$(PY) -m pip install -U pip
 
@@ -63,7 +74,7 @@ install: venv ## Install runtime + dev deps into .venv
 check-schema: venv
 	$(PY) scripts/check_schema.py
 
-run: install ## Run single experiment (uses CONFIG/EXP defaults)
+run: install ## Run single experiment (EXP/SEED/TRIALS/MODE) into results/<RUN_DIR>
 	. .venv/bin/activate && python scripts/run_batch.py --exp $(EXP) --seeds "$(SEED)" --trials $(TRIALS) --mode $(MODE) --outdir "$(RUN_DIR)"
 	printf "%s\n" "$(RUN_ID)" > $(RUN_CURRENT)
 
@@ -78,19 +89,19 @@ xrun:
 	eval $$CMD; rc=$$?; if [ $$rc -ne 0 ]; then exit $$rc; fi; \
 	printf "%s\n" "$(RUN_ID)" > $(RUN_CURRENT)
 
-sweep: install ## Multi-seed sweep
+sweep: install ## Multi-seed sweep (SEEDS) into results/<RUN_DIR>, then report
 	. .venv/bin/activate && python scripts/run_batch.py --exp $(EXP) --seeds "$(SEEDS)" --trials $(TRIALS) --mode $(MODE) --outdir "$(RUN_DIR)"
 	printf "%s\n" "$(RUN_ID)" > $(RUN_CURRENT)
 	$(MAKE) report RUN_ID=$(RUN_ID)
 
 .PHONY: demo
-demo: install ## Tiny SHIM sweep to produce minimal artifacts
+demo: install ## Tiny SHIM demo (two configs) -> report -> publish latest
 	$(MAKE) xsweep CONFIG=configs/airline_escalating_v1/run.yaml EXP=airline_escalating_v1 TRIALS=3 SEEDS="11,12" MODE=SHIM RUN_ID=$(RUN_ID)
 	$(MAKE) xsweep CONFIG=configs/airline_static_v1/run.yaml     EXP=airline_static_v1     TRIALS=3 SEEDS="11,12" MODE=SHIM RUN_ID=$(RUN_ID)
 	$(MAKE) report RUN_ID=$(RUN_ID)
 
 .ONESHELL: xsweep
-xsweep: install ## Configurable sweep (uses CONFIG)
+xsweep: install ## Configurable sweep from CONFIG -> results/<RUN_DIR>
 	mkdir -p "$(RUN_DIR)"
 	if [ -x "$(PY)" ]; then PYTHON_BIN="$(PY)"; else PYTHON_BIN="python"; fi; \
 	CMD=""$$PYTHON_BIN" "scripts/xsweep.py" --config "$(CONFIG)" --outdir "$(RUN_DIR)""; \
@@ -111,7 +122,7 @@ xsweep-all:
 topn:
 	$(PY) scripts/update_readme_topn.py
 
-aggregate:
+aggregate: ## Aggregate per-run CSV/notes into results/<RUN_DIR>
 	if [ -x "$(PY)" ]; then \
 		"$(PY)" scripts/aggregate_results.py --outdir "$(RUN_DIR)"; \
 	else \
@@ -137,14 +148,14 @@ test: install ## Run all Python tests
 	printf "%s\n" "$(RUN_ID)" > $(RUN_CURRENT)
 	@$(PY) -m pytest -q
 
-notes:
+notes: ## Auto-generate run notes if script is available
 	if [ -x "$(PY)" ]; then \
 		"$(PY)" scripts/aggregate_results.py --outdir "$(RUN_DIR)"; \
 	else \
 		python scripts/aggregate_results.py --outdir "$(RUN_DIR)"; \
 	fi
 
-report: aggregate plot notes latest
+report: aggregate plot notes latest ## Publish artifacts to results/ and refresh LATEST
 	mkdir -p $(RESULTS_DIR)
 	# Apply schema v1: add 'schema' column to summary.csv and write run.json
 	python tools/apply_schema_v1.py "$(RUN_DIR)"
@@ -182,14 +193,30 @@ install-tau: install
 	$(PY) scripts/ensure_tau_bench.py || (echo "tau_bench unavailable; continuing without real τ-Bench" && exit 0)
 
 .PHONY: ci
-ci: install
+ci: install ## CI entrypoint: minimal sweep & report (used in smoke)
 	$(MAKE) xsweep MODE=SHIM TRIALS=3 SEEDS=41,42 RUN_ID=$(RUN_ID)
 	$(MAKE) report RUN_ID=$(RUN_ID)
 
 .PHONY: latest
-latest:
+latest: ## Refresh results/LATEST to point at newest valid run (CSV+SVG)
 	@$(PYTHON) tools/latest_run.py $(RESULTS_DIR) $(LATEST_LINK) || true
 
 .PHONY: open-artifacts
-open-artifacts: latest
+open-artifacts: latest ## Open latest summary.svg and summary.csv (prints paths in CI)
 	@$(PYTHON) tools/open_artifacts.py
+
+# --- Developer UX ------------------------------------------------------------
+.PHONY: help
+help: ## List common targets and brief docs
+	@echo "DoomArena-Lab — common targets:"; \
+	grep -E '^[a-zA-Z0-9_-]+:.*?## ' $(firstword $(MAKEFILE_LIST)) | sed 's/:.*## / — /' | sort
+
+.PHONY: vars
+vars: ## Print effective overridable variables
+	@echo "EXP=$(EXP)"; \
+	echo "TRIALS=$(TRIALS)"; \
+	echo "SEED=$(SEED)"; \
+	echo "SEEDS=$(SEEDS)"; \
+	echo "MODE=$(MODE)"; \
+	echo "RUN_ID=$(RUN_ID)"; \
+	echo "RESULTS_DIR=$(RESULTS_DIR)"
