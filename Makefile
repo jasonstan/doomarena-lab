@@ -192,7 +192,7 @@ latest:
 	@$(PYTHON) tools/latest_run.py $(RESULTS_DIR) $(LATEST_LINK) || true
 
 .PHONY: open-artifacts
-# Open latest summary.svg and summary.csv (prints paths in CI)
-open-artifacts:
-	@$(MAKE) latest
-	@$(PYTHON) tools/open_artifacts.py
+# Open latest summary.svg and summary.csv.
+# Default is print-only (safe in CI). Pass `--open` locally if you want it to launch viewers.
+open-artifacts: latest
+	@$(PYTHON) tools/open_artifacts.py --results "$(RESULTS_DIR)/LATEST"
