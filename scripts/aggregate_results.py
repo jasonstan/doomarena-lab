@@ -3,10 +3,16 @@ from __future__ import annotations
 import csv
 import json
 import argparse
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
+
+# NOTE: first step toward de-duplication — leverage shared helpers where useful.
+if __package__ in (None, ""):
+    sys.path.append(str(Path(__file__).resolve().parent.parent))
+from scripts._lib import ensure_dir  # future: read_summary, weighted_asr_by_exp
 
 SUMMARY_COLUMNS: Tuple[str, ...] = (
     "exp_id",

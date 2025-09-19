@@ -7,7 +7,7 @@ Teams need **fast iteration** and **CI-friendly artifacts** to reason about agen
 - **Modes**: **SHIM** (simulation adapters) now; **REAL** (upstream DoomArena adapters) when available, with SHIM fallback.
 - **Make UX**: `make demo`, `make xsweep CONFIG=...`, `make report`, `make latest`, `make open-artifacts`.
 - **Artifacts**: Timestamped run dirs under `results/<RUN_DIR>/` with `summary.csv`, `summary.svg`, and (when produced) per-seed JSONL traces.
-- **Metrics/plots**: **Trial-weighted** micro-average ASR in a grouped-bar chart.
+- **Metrics/plots**: **Trial-weighted** micro-average ASR in a grouped-bar chart (via a tiny shared helper in `scripts/_lib.py`).
 
 ## Quick Start
 ```bash
