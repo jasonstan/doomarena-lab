@@ -54,7 +54,7 @@ def main() -> int:
     # Try to call the original plotter; on failure, fall back to placeholder
     try:
         result = subprocess.run(
-            [sys.executable, "scripts/plot_results.py", "--outdir", str(out)],
+            [sys.executable, "-m", "scripts.plot_results", "--outdir", str(out)],
             check=False,
         )
         if result.returncode != 0:
