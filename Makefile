@@ -151,10 +151,11 @@ aggregate:
 	fi
 
 plot:
+	# Use safe wrapper which writes a placeholder SVG if no data or plot fails
 	if [ -f "$(VENV)/bin/activate" ]; then \
-		. "$(VENV)/bin/activate" && python scripts/plot_results.py --outdir "$(RUN_DIR)"; \
+		. "$(VENV)/bin/activate" && python tools/plot_safe.py --outdir "$(RUN_DIR)"; \
 	else \
-		python scripts/plot_results.py --outdir "$(RUN_DIR)"; \
+		python tools/plot_safe.py --outdir "$(RUN_DIR)"; \
 	fi
 
 notes:
@@ -198,13 +199,6 @@ ci: install
 	$(MAKE) xsweep MODE=SHIM TRIALS=3 SEEDS=41,42 RUN_ID=$(RUN_ID)
 	$(MAKE) report RUN_ID=$(RUN_ID)
 
-.PHONY: latest
-latest:
-	@$(PYTHON) tools/latest_run.py $(RESULTS_DIR) $(LATEST_LINK) || true
-
-.PHONY: open-artifacts
-open-artifacts: latest
-	@$(PYTHON) tools/open_artifacts.py
 .PHONY: latest
 latest:
 	@$(PYTHON) tools/latest_run.py $(RESULTS_DIR) $(LATEST_LINK) || true
