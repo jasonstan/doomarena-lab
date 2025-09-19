@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse, subprocess, sys
 from pathlib import Path
 
+from mk_report import resolve_run_dir
+
 def can_run(cmd: str) -> bool:
     from shutil import which
     return which(cmd) is not None
@@ -21,12 +23,20 @@ def main(argv=None) -> int:
     ap.add_argument("--strict", action="store_true", help="exit non-zero if artifacts are missing")
     args = ap.parse_args(argv)
 
-    root = Path(args.results)
+    requested = Path(args.results)
+    root = resolve_run_dir(requested)
     svg = root / "summary.svg"
     csvp = root / "summary.csv"
 
     if not root.exists():
-        msg = f"[open-artifacts] No results to open: '{root}' does not exist. Run `make report` or `make demo` first."
+        msg = (
+            f"[open-artifacts] No results to open: '{requested}' does not exist. "
+            "Run `make report` or `make demo` first."
+        )
+        pointer = requested.parent / f"{requested.name}.path"
+        if pointer.exists():
+            target = pointer.read_text(encoding="utf-8").strip()
+            msg += f" Pointer file '{pointer}' points to '{target}'."
         print(msg)
         return 1 if args.strict else 0
 
