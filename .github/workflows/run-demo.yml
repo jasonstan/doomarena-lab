@@ -24,17 +24,15 @@ jobs:
           python-version: "3.11"
       - name: Install
         run: make install
-      - name: Run demo sweep(s)
+      - name: Run demo (single RUN_ID with both experiments)
         env:
           TRIALS: ${{ inputs.trials }}
           SEEDS: ${{ inputs.seeds }}
           MODE: ${{ inputs.mode }}
         run: |
-          make xsweep CONFIG=configs/airline_escalating_v1/run.yaml EXP=airline_escalating_v1 TRIALS="${TRIALS}" SEEDS="${SEEDS}" MODE="${MODE}"
-          make xsweep CONFIG=configs/airline_static_v1/run.yaml     EXP=airline_static_v1     TRIALS="${TRIALS}" SEEDS="${SEEDS}" MODE="${MODE}"
-      - name: Report + publish LATEST
+          make demo TRIALS="${TRIALS}" SEEDS="${SEEDS}" MODE="${MODE}"
+      - name: Publish LATEST
         run: |
-          make report
           make latest
       - name: Upload latest artifacts
         uses: actions/upload-artifact@v4
