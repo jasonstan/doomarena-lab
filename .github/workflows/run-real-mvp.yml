@@ -20,7 +20,7 @@ on:
         default: "1"
 permissions:
   contents: read
-  actions: read
+  actions: write
   id-token: write
 jobs:
   e2e-real:
