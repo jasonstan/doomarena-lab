@@ -69,7 +69,8 @@ results/
 - `make xsweep CONFIG=...` — run a configurable sweep.
 - `make report` — asserts `summary.csv` & `summary.svg`; refreshes `results/LATEST`.
 - `make latest` — refreshes/prints the newest run linked from `results/LATEST`.
-- `make open-artifacts` — ensures `results/LATEST` is set, then prints (and opens) the latest SVG/CSV.
+- `make open-artifacts` — prints paths to `results/LATEST/summary.svg` and `summary.csv` (safe in CI).  \
+  Add `--open` locally to launch files: `python tools/open_artifacts.py --open`.
 
 ### Testing
 - ✅ `make test-unit` — runs fast unit tests inside `.venv`
