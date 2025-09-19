@@ -9,7 +9,7 @@
 #   RUN_ID  ?= (timestamp default)     # results/<RUN_ID>; persisted via results/.run_id
 # ------------------------------------------------------------------------------
 
-.PHONY: venv install test run sweep aggregate report scaffold check-schema plot notes sweep3 real1 xrun xsweep xsweep-all topn demo test-unit ci latest open-artifacts journal install-tau help vars
+.PHONY: venv install test run sweep aggregate report scaffold check-schema plot notes sweep3 real1 xrun xsweep xsweep-all topn demo test-unit ci latest open-artifacts list-runs journal install-tau help vars
 
 SHELL := /bin/bash
 
@@ -203,6 +203,22 @@ latest:
 
 open-artifacts: latest
 	@$(PYTHON) tools/open_artifacts.py --results "$(RESULTS_DIR)/LATEST"
+
+.PHONY: list-runs
+list-runs: ## List timestamped results/<RUN_ID> folders and whether CSV/SVG exist
+	@if [ ! -d "$(RESULTS_DIR)" ]; then \
+		printf "No runs found in %s\n" "$(RESULTS_DIR)"; \
+	else \
+		printf "%-35s  %-3s  %-3s  %-5s %s\n" "RUN_DIR" "CSV" "SVG" "NOTES" "SIZE"; \
+                find "$(RESULTS_DIR)" -mindepth 1 -maxdepth 1 -type d -name "20*" | sort | while read -r d; do \
+                        test -f "$$d/summary.csv" && c=✓ || c=×; \
+                        test -f "$$d/summary.svg" && s=✓ || s=×; \
+                        test -f "$$d/notes.md" && n=✓ || n=×; \
+                        sz=$$(du -sh "$$d" 2>/dev/null | cut -f1); \
+                        [ -n "$$sz" ] || sz=-; \
+                        printf "%-35s  %-3s  %-3s  %-5s %s\n" "$${d#$(RESULTS_DIR)/}" "$$c" "$$s" "$$n" "$$sz"; \
+                done; \
+        fi
 
 .PHONY: help
 help: ## List common targets and brief docs

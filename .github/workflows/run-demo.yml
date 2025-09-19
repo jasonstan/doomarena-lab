@@ -24,18 +24,32 @@ jobs:
           python-version: "3.11"
       - name: Install
         run: make install
-      - name: Run demo sweep(s)
+      - name: Run demo (single RUN_ID with both experiments)
+        id: run-info
         env:
           TRIALS: ${{ inputs.trials }}
           SEEDS: ${{ inputs.seeds }}
           MODE: ${{ inputs.mode }}
         run: |
-          make xsweep CONFIG=configs/airline_escalating_v1/run.yaml EXP=airline_escalating_v1 TRIALS="${TRIALS}" SEEDS="${SEEDS}" MODE="${MODE}"
-          make xsweep CONFIG=configs/airline_static_v1/run.yaml     EXP=airline_static_v1     TRIALS="${TRIALS}" SEEDS="${SEEDS}" MODE="${MODE}"
+          RUN_ID="$(date -u '+%Y%m%d-%H%M%S')"
+          echo "RUN_ID=$RUN_ID"
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+          make xsweep CONFIG=configs/airline_escalating_v1/run.yaml EXP=airline_escalating_v1 TRIALS="${TRIALS}" SEEDS="${SEEDS}" MODE="${MODE}" RUN_ID="$RUN_ID"
+          make xsweep CONFIG=configs/airline_static_v1/run.yaml     EXP=airline_static_v1     TRIALS="${TRIALS}" SEEDS="${SEEDS}" MODE="${MODE}" RUN_ID="$RUN_ID"
       - name: Report + publish LATEST
+        env:
+          RUN_ID: ${{ steps.run-info.outputs.run_id }}
         run: |
-          make report
+          make report RUN_ID="${RUN_ID}"
           make latest
+      - name: Upload full RUN_DIR
+        if: steps.run-info.outputs.run_id != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: run-${{ steps.run-info.outputs.run_id }}
+          path: results/${{ steps.run-info.outputs.run_id }}/
+          if-no-files-found: error
+          retention-days: 7
       - name: Upload latest artifacts
         uses: actions/upload-artifact@v4
         with:
