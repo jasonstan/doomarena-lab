@@ -76,6 +76,10 @@ results/
 - `make latest` — refreshes `results/LATEST` to the newest run with `summary.csv` & `summary.svg`.
 - `make open-artifacts` — prints paths to `results/LATEST/summary.svg` and `summary.csv` (safe in CI). Add `--open` locally to launch files: `python tools/open_artifacts.py --open`.
 
+## Docs
+- [Architecture](docs/ARCHITECTURE.md) — data flow, contracts, schemas, CI
+- [Experiments](docs/EXPERIMENTS.md) — add/run configs, thresholds, tips
+
 ### Testing
 - ✅ `make test-unit` — runs fast unit tests inside `.venv`
 - ✅ `make test` — runs all tests inside `.venv`
