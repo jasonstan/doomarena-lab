@@ -1,4 +1,4 @@
-.PHONY: venv install test run sweep aggregate report scaffold check-schema plot notes sweep3 real1 xrun xsweep xsweep-all topn demo
+.PHONY: venv install test run sweep aggregate report scaffold check-schema plot notes sweep3 real1 xrun xsweep xsweep-all topn demo test-unit
 
 SHELL := /bin/bash
 
@@ -52,50 +52,18 @@ ifneq ($(origin EXP), file)
 EXP_OVERRIDE := $(EXP)
 endif
 
-venv:
+venv: ## Create local virtualenv
 	python -m venv $(VENV)
 	$(PY) -m pip install -U pip
 
-install: venv
+install: venv ## Install runtime + dev deps into .venv
 	$(PIP) install -U doomarena doomarena-taubench pytest pyyaml pandas matplotlib
 	$(PY) scripts/ensure_tau_bench.py || (echo "tau_bench unavailable; continuing without real τ-Bench" && exit 0)
-
-test: install demo
-	@echo "🔎 Validating results layout..."
-	@test -f results/summary.csv || (echo "missing results/summary.csv" && exit 1)
-	@python - <<-'PY'
-	import csv, sys
-	from pathlib import Path
-	p = Path("results/summary.csv")
-	f = p.open(newline="")
-	rdr = csv.DictReader(f)
-	hdr = { (h or "").strip().lower() for h in (rdr.fieldnames or []) }
-	f.close()
-	if not ("exp" in hdr and ("asr" in hdr or "attack_success_rate" in hdr)): print("CSV header invalid. Need 'exp' and 'asr' (or 'attack_success_rate'). Found:", hdr); sys.exit(1)
-	print("CSV headers OK")
-	PY
-	@test -f results/summary.svg || (echo "missing results/summary.svg" && exit 1)
-	@find results -type f -name '*seed*.jsonl' -print -quit | grep -q . || (echo "no per-seed jsonl files found under results/" && exit 1)
-	@echo "✅ Results schema & artifacts look good."
-	@RUN_ID="test_$$(date +%s)"; \
-	RUN_DIR="results/$${RUN_ID}"; \
-	mkdir -p "$$RUN_DIR"; \
-	cp -f results/summary.csv "$$RUN_DIR/" 2>/dev/null || true; \
-	cp -f results/summary.svg "$$RUN_DIR/" 2>/dev/null || true; \
-	find results -maxdepth 3 -type f -name '*seed*.jsonl' -exec cp -f {} "$$RUN_DIR/" \; 2>/dev/null || true; \
-	cp -f results/summary.md "$$RUN_DIR/" 2>/dev/null || true; \
-	printf "%s\n" "$$RUN_ID" > $(RUN_CURRENT); \
-	printf '🧪 Normalized test artifacts into %s\n' "$$RUN_DIR"; \
-	if [ -x "$(PY)" ]; then \
-	  "$(PY)" -m pytest -q; \
-	else \
-	  pytest -q; \
-	fi
 
 check-schema: venv
 	$(PY) scripts/check_schema.py
 
-run:
+run: install ## Run single experiment (uses CONFIG/EXP defaults)
 	. .venv/bin/activate && python scripts/run_batch.py --exp $(EXP) --seeds "$(SEED)" --trials $(TRIALS) --mode $(MODE) --outdir "$(RUN_DIR)"
 	printf "%s\n" "$(RUN_ID)" > $(RUN_CURRENT)
 
@@ -110,19 +78,19 @@ xrun:
 	eval $$CMD; rc=$$?; if [ $$rc -ne 0 ]; then exit $$rc; fi; \
 	printf "%s\n" "$(RUN_ID)" > $(RUN_CURRENT)
 
-sweep:
+sweep: install ## Multi-seed sweep
 	. .venv/bin/activate && python scripts/run_batch.py --exp $(EXP) --seeds "$(SEEDS)" --trials $(TRIALS) --mode $(MODE) --outdir "$(RUN_DIR)"
 	printf "%s\n" "$(RUN_ID)" > $(RUN_CURRENT)
 	$(MAKE) report RUN_ID=$(RUN_ID)
 
 .PHONY: demo
-demo:
+demo: install ## Tiny SHIM sweep to produce minimal artifacts
 	$(MAKE) xsweep CONFIG=configs/airline_escalating_v1/run.yaml EXP=airline_escalating_v1 TRIALS=3 SEEDS="11,12" MODE=SHIM RUN_ID=$(RUN_ID)
 	$(MAKE) xsweep CONFIG=configs/airline_static_v1/run.yaml     EXP=airline_static_v1     TRIALS=3 SEEDS="11,12" MODE=SHIM RUN_ID=$(RUN_ID)
 	$(MAKE) report RUN_ID=$(RUN_ID)
 
 .ONESHELL: xsweep
-xsweep:
+xsweep: install ## Configurable sweep (uses CONFIG)
 	mkdir -p "$(RUN_DIR)"
 	if [ -x "$(PY)" ]; then PYTHON_BIN="$(PY)"; else PYTHON_BIN="python"; fi; \
 	CMD=""$$PYTHON_BIN" "scripts/xsweep.py" --config "$(CONFIG)" --outdir "$(RUN_DIR)""; \
@@ -150,13 +118,24 @@ aggregate:
 		python scripts/aggregate_results.py --outdir "$(RUN_DIR)"; \
 	fi
 
-plot:
+plot: ## Plot results (safe wrapper creates placeholder SVG if empty)
 	# Use safe wrapper which writes a placeholder SVG if no data or plot fails
 	if [ -f "$(VENV)/bin/activate" ]; then \
 		. "$(VENV)/bin/activate" && python tools/plot_safe.py --outdir "$(RUN_DIR)"; \
 	else \
 		python tools/plot_safe.py --outdir "$(RUN_DIR)"; \
 	fi
+
+# --- Testing shortcuts -------------------------------------------------------
+.PHONY: test-unit
+test-unit: install ## Run fast unit tests only
+	@$(PY) -m pytest -q tests/test_paths.py
+
+.PHONY: test
+test: install ## Run all Python tests
+	$(MAKE) demo RUN_ID=$(RUN_ID)
+	printf "%s\n" "$(RUN_ID)" > $(RUN_CURRENT)
+	@$(PY) -m pytest -q
 
 notes:
 	if [ -x "$(PY)" ]; then \
