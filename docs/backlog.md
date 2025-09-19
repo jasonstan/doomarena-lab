@@ -19,32 +19,41 @@
 
 ## Next up (to real MVP)
 ### A. REAL MVP (first cloud model) — **priority**
-**Why**: E2E without an actual model isn’t a true MVP. We need one “REAL” lane to prove value for product/governance teams.
+**Why**: E2E without a real model isn’t a true MVP for product/governance review.
+**Provider choice**:
+- **Default**: **Groq Llama 3.1 8B (instant)** — very low cost and fast; ideal for iterative demos.
+- **Backup**: **Google Gemini 1.5 Flash** — also inexpensive with a free tier; keep as alternative path.
+**Sizing today**: with TRIALS=3, SEEDS=2 (~6 calls/run), costs are fractions of a cent on Groq; affordable on Gemini. (Costs scale linearly with trials/seeds.)
 **Definition of done**:
-- `MODE=REAL` path exists for one exp (e.g., `airline_static_v1`).
-- Thin adapter module (no heavy framework): takes prompt(s) → calls provider → returns text.
-- Configurable via `configs/<exp>/run.yaml` with `provider`, `model`, and `env var` key names.
-- Local: developer runs `make demo MODE=REAL` using env vars.
-- CI (optional, non-required): a **manual** workflow `run-real-mvp` that reads `secrets.*` and uploads artifacts (not a required check).
+- `MODE=REAL` runs for `airline_static_v1` using Groq; artifacts identical to SHIM path.
+- `RealClient.generate()` implements Groq HTTP with timeout and token caps; model/env configured via YAML (`provider`, `model`, `api_key_env`).
+- **Manual** workflow `run-real-mvp` reads `REAL_API_KEY` secret and publishes artifacts; not required for PRs.
 **Tasks**:
-1. `adapters/real_client.py` (tiny):
-   - `class RealClient(provider:str, model:str, api_key_env:str)` with `generate(prompt:str) -> str`.
-   - Provider-agnostic shim; implement one provider first (HTTP POST), errors become failed trials.
-2. Wire REAL into `scripts/run_experiment.py`:
-   - If `MODE=REAL`, instantiate `RealClient` from config; SHIM path unchanged.
-3. Config + secrets:
-   - Add fields to `configs/airline_static_v1/run.yaml`: `provider`, `model`, `api_key_env`.
-   - README snippet: export env var locally; GitHub Actions: inputs map to `${{ secrets.* }}` for **manual** workflow.
-4. Workflow:
-   - New `.github/workflows/run-real-mvp.yml` (workflow_dispatch): install → `make demo MODE=REAL` (with safe default TRIALS=1, SEEDS=1) → `make report latest` → upload artifacts. Not required for PRs.
-5. Guardrails:
-   - Timeouts/retries in adapter; redact secrets from logs; cap tokens/price via config.
+1. Implement Groq HTTP in `adapters/real_client.py` behind provider `"groq"`; keep `"echo"` for offline tests.
+2. Add config examples:
+   ```yaml
+   provider: groq
+   model: llama-3.1-8b-instant
+   api_key_env: REAL_API_KEY
+   ```
+3. Add `tools/estimate_cost.py` (optional) + `make estimate-cost` to project run cost (TOK_IN/TOK_OUT, TRIALS/SEEDS).
+4. `run.json` enrichment: record provider/model and a **cost_estimate** per run (header-level).
+5. Docs: README snippet for setting `REAL_API_KEY` (Actions secret + local `.env`).
 
-### B. Test coverage on behavior (fast)
+### B. Governance & policy gates — **expand**
+**Why**: Keep security research productive while respecting provider AUPs.
+**Done**: baseline policy gate routing (`policy: benign|sensitive|prohibited`) with override env (`ALLOW_SENSITIVE=1`), decision recorded in `run.json`.
+**Next**:
+1. **Benign surrogate** mechanism: allow configs to specify placeholder payloads for sensitive tests (exercise control flow without AUP violations).
+2. **REAL thresholds**: extend thresholds.yaml with optional `real:` block (e.g., higher `min_trials`), post in PR comment; keep warn-only by default.
+3. **Audit log**: append a `policy_decisions` array in `run.json` (per exp) for downstream reporting.
+4. **Docs**: AUP quick references; examples of sensitive → surrogate rewrites.
+
+### C. Test coverage on behavior (fast)
 1. Unit test for trial-weighted micro-average in `scripts/_lib.py`. ✅ basic added; extend with edge-cases (0 trials, mixed seeds).
 2. “Smoke+assert” on CSV header & non-empty rows for SHIM/REAL E2E (behind an env flag for REAL).
 
-### C. Developer UX polish (quick wins)
+### D. Developer UX polish (quick wins)
 1. `make quickstart` — `install → demo → report → open-artifacts` (exists). Expand README.
 2. `make list-runs` formatting tweaks (column widths) — optional.
 3. `make vars` prints effective config incl. MODE/RUN_ID (exists).
