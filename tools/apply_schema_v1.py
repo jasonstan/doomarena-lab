@@ -52,6 +52,7 @@ def ensure_schema_column(csv_path: Path) -> None:
 
 def write_run_json(run_dir: Path) -> None:
     run_json = run_dir / "run.json"
+
     existing: dict[str, object] = {}
     if run_json.exists():
         try:
@@ -69,6 +70,7 @@ def write_run_json(run_dir: Path) -> None:
             "git": git_info(),
         }
     )
+
     run_json.write_text(json.dumps(out, indent=2) + "\n", encoding="utf-8")
 
 def main(argv):

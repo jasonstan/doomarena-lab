@@ -1,10 +1,15 @@
 seed: 42
 trials: 20
 online: false
+
+# Governance routing for REAL
+policy: benign
+
 # Optional REAL settings (used when MODE=REAL)
 provider: echo
 model: stub
 api_key_env: REAL_API_KEY
+
 attack:
   type: escalating_dialogue
   levels:

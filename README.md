@@ -62,6 +62,12 @@ make demo && make report
   - Metadata is recorded in `results/<RUN_ID>/run.json` under `.real` (provider/model/key env, healthcheck).
   - Use **Actions → `run-real-mvp`** to run with `MODE=REAL` (manual, secrets-aware). A true provider can be added next.
 
+## Policy tags & routing
+- Add `policy: benign|sensitive|prohibited` to each experiment config.
+- Only `benign` experiments will hit REAL providers by default.
+- Marking a config `policy: sensitive` routes MODE=REAL → SHIM unless you export `ALLOW_SENSITIVE=1`.
+- `policy: prohibited` always runs via SHIM. Each run records the decision in `results/<RUN_ID>/run.json`.
+
 ## Make targets (TL;DR)
 - `make help` — list common targets & docs.
 - `make demo` — tiny sweep (defaults to SHIM) producing `results/<RUN_ID>/`.

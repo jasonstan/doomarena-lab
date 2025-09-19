@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import random
+import subprocess
 import sys
 from collections.abc import Iterable
 from pathlib import Path
@@ -137,6 +138,55 @@ def main() -> None:
         raise SystemExit("Config missing 'exp' field")
 
     config_path = Path(args.config)
+    requested_mode = str(cfg.get("mode", "SHIM")).upper()
+
+    gate_decision: Dict[str, Any] = {
+        "requested_mode": requested_mode,
+        "effective_mode": requested_mode,
+        "allowed": True,
+        "tag": "unknown",
+        "reason": "",
+    }
+
+    gate_script = Path(__file__).resolve().parents[1] / "tools" / "policy_gate.py"
+    if gate_script.exists():
+        env = os.environ.copy()
+        env["MODE"] = requested_mode
+        try:
+            raw = subprocess.check_output(
+                [sys.executable, gate_script.as_posix(), config_path.as_posix()],
+                text=True,
+                env=env,
+            ).strip()
+            if raw:
+                gate_decision = json.loads(raw)
+        except Exception:
+            gate_decision = {
+                "requested_mode": requested_mode,
+                "effective_mode": requested_mode,
+                "allowed": True,
+                "tag": "unknown",
+                "reason": "gate-unavailable",
+            }
+    else:
+        gate_decision["reason"] = "gate-missing"
+
+    effective_mode = str(gate_decision.get("effective_mode", requested_mode) or "SHIM").upper()
+    gate_decision["effective_mode"] = effective_mode
+    gate_decision["requested_mode"] = str(
+        gate_decision.get("requested_mode", requested_mode) or requested_mode
+    ).upper()
+    tag_value = gate_decision.get("tag")
+    if not tag_value or tag_value == "unknown":
+        gate_decision["tag"] = str(
+            cfg.get("policy") or cfg.get("policy_tag") or "benign"
+        ).strip().lower()
+
+    if requested_mode == "REAL" and effective_mode != "REAL":
+        print(f"[policy] rerouting REAL -> {effective_mode}: {gate_decision.get('reason', '')}")
+
+    cfg["mode"] = effective_mode
+    requested_mode = effective_mode
     cfg_hash_value = cfg_hash(config_path)
     config_parent = config_path.parent.name or config_path.stem
     short_hash = cfg_hash_value[:8] if cfg_hash_value else "unknown"
@@ -151,7 +201,6 @@ def main() -> None:
             raise SystemExit("Seed must be provided via --seed or config 'seeds'")
     seed = int(seed)
 
-    requested_mode = str(cfg.get("mode", "SHIM")).upper()
     trials = int(cfg.get("trials", 0))
 
     outdir = Path(args.outdir).expanduser()
@@ -268,6 +317,17 @@ def main() -> None:
         mode=actual_mode,
         meta_path=jsonl_path.with_suffix(".meta.json"),
     )
+
+    run_json_path = outdir / "run.json"
+    outdir.mkdir(parents=True, exist_ok=True)
+    try:
+        run_meta = json.loads(run_json_path.read_text(encoding="utf-8"))
+    except Exception:
+        run_meta = {}
+    run_meta.setdefault("results_schema", "1")
+    run_meta["mode"] = actual_mode
+    run_meta["policy"] = gate_decision
+    run_json_path.write_text(json.dumps(run_meta, indent=2), encoding="utf-8")
 
     print(f"ASR={asr:.6f}")
     print(f"JSONL={jsonl_path.as_posix()}")

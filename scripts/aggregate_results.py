@@ -616,15 +616,21 @@ def main() -> None:
 
     jsonl_files = sorted(base_dir.rglob("*.jsonl"))
     if not jsonl_files:
+        # Fallback: search one level up for legacy layouts
         parent_dir = base_dir.parent
+        fallback: List[Path] = []
         if parent_dir.exists() and parent_dir != base_dir:
-            fallback: List[Path] = []
             for candidate in parent_dir.rglob("*.jsonl"):
                 try:
                     candidate.relative_to(base_dir)
                 except ValueError:
                     fallback.append(candidate)
-            jsonl_files = sorted(fallback)
+        jsonl_files = sorted(fallback)
+
+    new_rows: List[Dict[str, str]] = []
+    for path in jsonl_files:
+        header, summary = read_jsonl(path)
+        ...
     new_rows: List[Dict[str, str]] = []
     for path in jsonl_files:
         try:
