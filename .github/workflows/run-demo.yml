@@ -1,4 +1,5 @@
 name: run-demo
+
 on:
   workflow_dispatch:
     inputs:
@@ -14,16 +15,20 @@ on:
         description: "Mode (SHIM or REAL)"
         required: false
         default: "SHIM"
+
 jobs:
   e2e:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
       - name: Install
         run: make install
+
       - name: Run demo (single RUN_ID with both experiments)
         env:
           TRIALS: ${{ inputs.trials }}
@@ -31,9 +36,28 @@ jobs:
           MODE: ${{ inputs.mode }}
         run: |
           make demo TRIALS="${TRIALS}" SEEDS="${SEEDS}" MODE="${MODE}"
-      - name: Publish LATEST
+
+      - name: Report + publish LATEST
         run: |
+          make report
           make latest
+
+      - name: Determine RUN_ID
+        id: rid
+        run: |
+          RID="$(cat results/.run_id 2>/dev/null || true)"
+          echo "run_id=$RID" >> "$GITHUB_OUTPUT"
+          echo "RUN_ID=$RID"
+
+      - name: Upload full RUN_DIR
+        if: steps.rid.outputs.run_id != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: run-${{ steps.rid.outputs.run_id }}
+          path: results/${{ steps.rid.outputs.run_id }}/
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Upload latest artifacts
         uses: actions/upload-artifact@v4
         with:
