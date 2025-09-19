@@ -84,3 +84,28 @@ jobs:
             results/LATEST/index.html
           if-no-files-found: error
           retention-days: 7
+      - name: Find existing smoke comment
+        if: github.event_name == 'pull_request'
+        id: find_smoke_comment
+        uses: peter-evans/find-comment@v3
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          body-includes: '### DoomArena-Lab PR smoke results'
+      - name: Compose PR comment
+        if: github.event_name == 'pull_request'
+        id: compose
+        run: |
+          python tools/pr_comment_latest.py > pr_body.md
+          # Append thresholds summary (warn-only)
+          python tools/check_thresholds.py --results results/LATEST --thresholds thresholds.yaml --out th.md || true
+          { echo ""; echo "#### Thresholds"; cat th.md || true; } >> pr_body.md
+          echo "body<<EOF" >> $GITHUB_OUTPUT
+          cat pr_body.md >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+      - name: Update smoke comment
+        if: github.event_name == 'pull_request'
+        uses: peter-evans/create-or-update-comment@v3
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          body: ${{ steps.compose.outputs.body }}
+          comment-id: ${{ steps.find_smoke_comment.outputs.comment-id }}

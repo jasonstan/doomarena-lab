@@ -49,6 +49,7 @@ results/
 ```
 
 **Schemas**: each run writes a `run.json` declaring `results_schema` / `summary_schema` (currently `"1"`), and `summary.csv` includes a `schema` column. Bump when columns or semantics change.
+**Thresholds (optional):** declare guardrails in `thresholds.yaml` (`min_trials`, `max_asr`, `min_asr`). CI posts a PASS/WARN/FAIL table on each PR (warn-only by default). Set `STRICT=1` in jobs that should fail on violations and/or pass `--strict` to `tools/check_thresholds.py`.
 
 **`summary.csv` schema (minimum fields):**
 - `exp` – experiment name
@@ -88,3 +89,4 @@ The smoke workflow runs a tiny SHIM sweep and publishes artifacts. It also updat
 
 ## Contributing
 PRs welcome. Keep demos fast and artifacts reproducible. Aim for small, reviewable changes.
+

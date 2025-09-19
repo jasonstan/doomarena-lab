@@ -17,6 +17,7 @@ EXPECTED_COLUMNS = [
     "asr",
     "git_commit",
     "run_at",
+    "schema",
 ]
 
 
