@@ -3,10 +3,8 @@ __pycache__/
 .venv/
 .env
 .ipynb_checkpoints/
-results/*
+results/
 !results/.gitkeep
-!results/summary.csv
-!results/summary.svg
 artifacts/
 .cache/
 dist/
