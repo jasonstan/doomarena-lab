@@ -6,8 +6,11 @@ import json
 import os
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 
+from adapters.results_logger import jsonl_writer
 from scripts.providers.groq import chat
+from scripts.run_meta import git_info
 
 
 RESULTS_ROOT = Path("results")
@@ -23,6 +26,30 @@ def ensure_dir(path: Path) -> None:
     """Create a directory (and parents) if it does not already exist."""
 
     path.mkdir(parents=True, exist_ok=True)
+
+
+def _env_price(name: str) -> float:
+    try:
+        return float(os.getenv(name, "") or 0.0)
+    except ValueError:
+        return 0.0
+
+
+def _compute_cost(usage: dict[str, object]) -> Optional[float]:
+    price_in = _env_price("GROQ_PRICE_IN_PER_1K")
+    price_out = _env_price("GROQ_PRICE_OUT_PER_1K")
+    if not (price_in or price_out):
+        return None
+    try:
+        prompt_tokens = int(usage.get("prompt_tokens") or 0)
+    except (TypeError, ValueError):
+        prompt_tokens = 0
+    try:
+        completion_tokens = int(usage.get("completion_tokens") or 0)
+    except (TypeError, ValueError):
+        completion_tokens = 0
+    cost = (prompt_tokens / 1000.0) * price_in + (completion_tokens / 1000.0) * price_out
+    return round(cost, 6)
 
 
 def main() -> None:
@@ -56,6 +83,9 @@ def main() -> None:
     (run_dir / "response.json").write_text(json.dumps(raw, indent=2), encoding="utf-8")
 
     usage = raw.get("usage", {}) if isinstance(raw, dict) else {}
+    telemetry = raw.get("_telemetry", {}) if isinstance(raw, dict) else {}
+    latency_ms = telemetry.get("latency_ms") if isinstance(telemetry, dict) else None
+    cost_usd = _compute_cost(usage)
     (run_dir / "usage.json").write_text(json.dumps(usage, indent=2), encoding="utf-8")
 
     run_json = {
@@ -66,8 +96,58 @@ def main() -> None:
         "prompt_tokens": usage.get("prompt_tokens"),
         "completion_tokens": usage.get("completion_tokens"),
         "total_tokens": usage.get("total_tokens"),
+        "latency_ms": latency_ms,
+        "cost_usd": cost_usd,
     }
     (run_dir / "run.json").write_text(json.dumps(run_json, indent=2), encoding="utf-8")
+
+    jsonl_path = run_dir / "real_mvp.jsonl"
+    writer = jsonl_writer(jsonl_path.as_posix())
+    git_meta = git_info()
+    now_iso = datetime.now(timezone.utc).isoformat()
+    header = {
+        "event": "header",
+        "exp": "real_mvp",
+        "exp_id": f"real_mvp:{run_id}",
+        "config": "REAL_MVP",
+        "cfg_hash": "",
+        "mode": "REAL",
+        "seed": 0,
+        "seeds": [0],
+        "trials": 1,
+        "git_commit": git_meta.get("commit", ""),
+        "run_at": now_iso,
+        "provider": "groq",
+        "model": model,
+        "run_id": run_id,
+    }
+    writer(header)
+
+    trial_record = {
+        "event": "trial",
+        "trial": 1,
+        "prompt": prompt,
+        "reply": reply,
+        "prompt_tokens": usage.get("prompt_tokens"),
+        "completion_tokens": usage.get("completion_tokens"),
+        "total_tokens": usage.get("total_tokens"),
+        "latency_ms": latency_ms,
+        "cost_usd": cost_usd,
+        "provider": "groq",
+        "model": model,
+    }
+    writer(trial_record)
+
+    summary_record = {
+        "event": "summary",
+        "trials": 1,
+        "successes": 0,
+        "asr": 0.0,
+        "sum_tokens": usage.get("total_tokens") or 0,
+        "avg_latency_ms": latency_ms,
+        "sum_cost_usd": cost_usd,
+    }
+    writer(summary_record)
 
     latest = results_dir / "LATEST"
     try:

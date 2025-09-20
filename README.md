@@ -43,6 +43,17 @@ Before wiring REAL into experiments, verify your credentials + connectivity:
 You should see `PROBE: OK` and a short model reply. In CI, set repo **Secrets**
 (e.g., `GROQ_API_KEY`) instead of using `.env`.
 
+### Optional REAL cost estimation
+Set per-1K token prices via environment variables to record estimated spend in
+`sum_cost_usd` columns:
+
+```bash
+export GROQ_PRICE_IN_PER_1K=0.20
+export GROQ_PRICE_OUT_PER_1K=0.20
+```
+
+If unset, cost fields remain blank.
+
 ### Latest Results (auto)
 Local runs write the freshest artifacts directly to `results/` (updated by `make report`).
 In CI, the workflow publishes a `results/LATEST/` folder inside the run’s artifacts,

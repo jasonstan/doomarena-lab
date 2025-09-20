@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from typing import Dict, List, Tuple
 import urllib.error
 import urllib.request
@@ -39,6 +40,7 @@ def chat(
     req.add_header("Content-Type", "application/json")
     req.add_header("Authorization", f"Bearer {key}")
 
+    t0 = time.time()
     try:
         with urllib.request.urlopen(req, timeout=60) as resp:
             payload = resp.read().decode("utf-8")
@@ -47,11 +49,15 @@ def chat(
         raise RuntimeError(f"Groq API error: {exc.code} {exc.reason}: {detail}") from exc
 
     raw = json.loads(payload)
+    latency_ms = int((time.time() - t0) * 1000)
 
     # Extract assistant text (first choice)
     try:
         text = raw["choices"][0]["message"]["content"]
     except Exception:  # pragma: no cover - defensive
         text = ""
+
+    if isinstance(raw, dict):
+        raw.setdefault("_telemetry", {})["latency_ms"] = latency_ms
 
     return text, raw
