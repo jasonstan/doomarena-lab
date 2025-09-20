@@ -58,11 +58,21 @@ jobs:
           import json, sys
 
           data = json.load(sys.stdin)
-          msg = (data.get("choices") or [{}])[0].get("message", {}).get("content")
+          error = data.get("error")
+          if error:
+              print(f"ERROR: {error}")
+              sys.exit(1)
+
+          msg = None
+          choices = data.get("choices") or []
+          if choices:
+              msg = choices[0].get("message", {}).get("content")
+
           if msg:
               print(f"REPLY: {msg}")
           else:
               print("REPLY: <no content>")
+              sys.exit(1)
           PY
 
       - name: Probe Gemini (REST)
@@ -90,15 +100,22 @@ jobs:
           import json, sys
 
           data = json.load(sys.stdin)
-          content = None
+          error = data.get("error")
+          if error:
+              print(f"ERROR: {error}")
+              sys.exit(1)
+
+          content_text = None
           candidates = data.get("candidates") or []
           if candidates:
               content = candidates[0].get("content") or {}
               parts = content.get("parts") or []
               if parts:
-                  content = parts[0].get("text")
-          if content:
-              print(f"REPLY: {content}")
+                  content_text = parts[0].get("text")
+
+          if content_text:
+              print(f"REPLY: {content_text}")
           else:
               print("REPLY: <no content>")
+              sys.exit(1)
           PY
