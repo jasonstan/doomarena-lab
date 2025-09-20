@@ -30,9 +30,11 @@ RUN_ID=$(date -u +%Y%m%d-%H%M%S) make demo report
 Prefer one command? Run `make quickstart` for `install → demo → report → open-artifacts`.
 
 ### Latest Results (auto)
-The newest successful run is symlinked to `results/LATEST` (created/updated by `make report`).
+Local runs write the freshest artifacts directly to `results/` (updated by `make report`).
+In CI, the workflow publishes a `results/LATEST/` folder inside the run’s artifacts,
+but that directory is not created in your working copy by default.
 
-![Latest results](results/LATEST/summary.svg)
+[![Latest results](results/summary.svg)](results/index.html)
 
 If you see a broken image, run:
 ```bash
