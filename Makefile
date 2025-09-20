@@ -213,6 +213,20 @@ tidy-run: ## Remove redundant files in results/$(RUN_ID) (timestamped copies, PN
 open-artifacts: latest
 	@$(PYTHON) tools/open_artifacts.py --results "$(RESULTS_DIR)/LATEST"
 
+#
+# === Provider probes ===
+.PHONY: probe-groq
+probe-groq: ## Verify Groq connectivity (needs GROQ_API_KEY)
+	@$(PYTHON) tools/llm_probe.py --provider groq --model llama-3.1-8b-instant --prompt "Say: OK"
+
+.PHONY: probe-gemini
+probe-gemini: ## Verify Gemini connectivity (needs GEMINI_API_KEY)
+	@$(PYTHON) tools/llm_probe.py --provider gemini --model gemini-1.5-flash-latest --prompt "Say: OK"
+
+.PHONY: env-example
+env-example: ## Write a local .env from template if missing
+	@[ -f .env ] && echo ".env already exists" || (cp .env.example .env && echo "Wrote .env (fill in keys)")
+
 .PHONY: list-runs
 list-runs: ## List timestamped results/<RUN_ID> folders and whether CSV/SVG exist
 	@if [ ! -d "$(RESULTS_DIR)" ]; then \
