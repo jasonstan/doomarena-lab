@@ -45,11 +45,13 @@ jobs:
             exit 0
           fi
           echo "Calling Groq model: $MODEL"
+          echo "PROMPT: $PROMPT"
           RESP_FILE="$(mktemp /tmp/groq_response.XXXXXX.json)"
+          PAYLOAD="$(jq -nc --arg m "$MODEL" --arg p "$PROMPT" '{model:$m, messages:[{role:"user", content:$p}], max_tokens:64, temperature:0.2}')"
           REPLY_TEXT="$(curl -sS https://api.groq.com/openai/v1/chat/completions \
             -H "Authorization: Bearer $GROQ_API_KEY" \
             -H "Content-Type: application/json" \
-            -d "{\"model\":\"$MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"$PROMPT\"}],\"max_tokens\":64}" \
+            -d "$PAYLOAD" \
             | tee "$RESP_FILE" \
             | jq -r '
               if .error then
@@ -73,6 +75,10 @@ jobs:
             exit 1
           fi
           echo "REPLY: $REPLY_TEXT"
+          PROMPT_TOKENS="$(jq -r '.usage.prompt_tokens // 0' "$RESP_FILE")"
+          COMPLETION_TOKENS="$(jq -r '.usage.completion_tokens // 0' "$RESP_FILE")"
+          TOTAL_TOKENS="$(jq -r '.usage.total_tokens // 0' "$RESP_FILE")"
+          echo "USAGE: prompt=$PROMPT_TOKENS completion=$COMPLETION_TOKENS total=$TOTAL_TOKENS"
           echo "Saved raw response to $RESP_FILE"
 
       - name: Probe Gemini (REST)
