@@ -1,101 +1,104 @@
-name: probe-provider
+name: Probe provider
+
 on:
   workflow_dispatch:
     inputs:
       provider:
-        description: "Which provider to probe (groq|gemini)"
+        description: "Which provider to probe"
         required: true
         default: groq
+        type: choice
+        options: [groq, gemini]
+      prompt:
+        description: "Prompt to send"
+        required: false
+        default: "Say: hello from doomarena-lab"
+      groq_model:
+        description: "Groq model (OpenAI-compatible)"
+        required: false
+        default: "llama-3.1-70b-versatile"
+
+permissions:
+  contents: read
+
 jobs:
   probe:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Select provider
-        id: pick
         run: |
-          case "${{ github.event.inputs.provider }}" in
-            groq)   echo "prov=groq"   >> "$GITHUB_OUTPUT" ;;
-            gemini) echo "prov=gemini" >> "$GITHUB_OUTPUT" ;;
-            *) echo "Unknown provider"; exit 1 ;;
-          esac
+          echo "Provider: ${{ inputs.provider }}"
+          echo "Prompt:   ${{ inputs.prompt }}"
+          echo "Groq model: ${{ inputs.groq_model }}"
 
       - name: Probe Groq (OpenAI-compatible)
-        if: steps.pick.outputs.prov == 'groq'
+        if: ${{ inputs.provider == 'groq' }}
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          # Optional: override in workflow run -> 'Env vars' as GROQ_MODEL
-          # Examples: llama-3.1-70b-versatile, llama-3.1-8b-instant, llama-guard-3-8b
-          GROQ_MODEL: ${{ env.GROQ_MODEL }}
+          MODEL: ${{ inputs.groq_model }}
+          PROMPT: ${{ inputs.prompt }}
         run: |
-          set -euo pipefail
-
           if [ -z "$GROQ_API_KEY" ]; then
-            echo "Missing GROQ_API_KEY secret"; exit 1
+            echo "::warning::GROQ_API_KEY is not set. Add it in Settings > Secrets and variables > Actions."
+            exit 0
           fi
-          # Default to a currently-supported model if none provided
-          MODEL="${GROQ_MODEL:-llama-3.1-70b-versatile}"
-          # Minimal chat prompt using Groq's OpenAI-compatible endpoint
-          BODY='{
-            "model": "'"${MODEL}"'",
-            "messages": [{"role":"user","content":"Reply with: GROQ_OK"}],
-            "temperature": 0
-          }'
-          curl --fail -sS https://api.groq.com/openai/v1/chat/completions \
-            -H "Authorization: Bearer ${GROQ_API_KEY}" \
+          echo "Calling Groq model: $MODEL"
+          RESP="$(curl -sS https://api.groq.com/openai/v1/chat/completions \
+            -H "Authorization: Bearer $GROQ_API_KEY" \
             -H "Content-Type: application/json" \
-            -d "$BODY" \
-            -o response.json
-          # Extract a tiny snippet (best-effort)
-          node <<'NODE'
-const fs = require('fs');
-const res = JSON.parse(fs.readFileSync('response.json', 'utf8'));
+            -d "{\"model\":\"$MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"$PROMPT\"}],\"max_tokens\":64}")" || {
+            echo "::error::curl failed"
+            exit 1
+          }
+          echo "RAW_RESPONSE_JSON<<EOF"
+          echo "$RESP"
+          echo "EOF"
+          echo "$RESP" | python - <<'PY'
+          import json, sys
 
-if (res.error) {
-  console.error('ERROR:', res.error.message || JSON.stringify(res.error));
-  process.exit(1);
-}
-
-const content = res.choices?.[0]?.message?.content?.trim();
-if (!content) {
-  console.error('NO_CONTENT');
-  process.exit(1);
-}
-
-console.log('REPLY:', content.slice(0, 120));
-NODE
+          data = json.load(sys.stdin)
+          msg = (data.get("choices") or [{}])[0].get("message", {}).get("content")
+          if msg:
+              print(f"REPLY: {msg}")
+          else:
+              print("REPLY: <no content>")
+          PY
 
       - name: Probe Gemini (REST)
-        if: steps.pick.outputs.prov == 'gemini'
+        if: ${{ inputs.provider == 'gemini' }}
         env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          PROMPT: ${{ inputs.prompt }}
         run: |
-          set -euo pipefail
-
-          if [ -z "$GEMINI_API_KEY" ]; then
-            echo "Missing GEMINI_API_KEY secret"; exit 1
+          if [ -z "$GOOGLE_API_KEY" ]; then
+            echo "::warning::GOOGLE_API_KEY is not set. Add it in Settings > Secrets and variables > Actions."
+            exit 0
           fi
-          BODY='{
-            "contents": [{"parts": [{"text": "Reply with: GEMINI_OK"}]}]
-          }'
-          curl --fail -sS "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}" \
+          echo "Calling Gemini 1.5 Flash"
+          RESP="$(curl -sS -X POST \
             -H "Content-Type: application/json" \
-            -d "$BODY" \
-            -o response.json
-          # Extract a tiny snippet (best-effort)
-          node <<'NODE'
-const fs = require('fs');
-const res = JSON.parse(fs.readFileSync('response.json', 'utf8'));
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$GOOGLE_API_KEY" \
+            -d "{\"contents\":[{\"parts\":[{\"text\":\"$PROMPT\"}]}]}")" || {
+            echo "::error::curl failed"
+            exit 1
+          }
+          echo "RAW_RESPONSE_JSON<<EOF"
+          echo "$RESP"
+          echo "EOF"
+          echo "$RESP" | python - <<'PY'
+          import json, sys
 
-if (res.error) {
-  console.error('ERROR:', res.error.message || JSON.stringify(res.error));
-  process.exit(1);
-}
-
-const content = res.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-if (!content) {
-  console.error('NO_CONTENT');
-  process.exit(1);
-}
-
-console.log('REPLY:', content.slice(0, 120));
-NODE
+          data = json.load(sys.stdin)
+          content = None
+          candidates = data.get("candidates") or []
+          if candidates:
+              content = candidates[0].get("content") or {}
+              parts = content.get("parts") or []
+              if parts:
+                  content = parts[0].get("text")
+          if content:
+              print(f"REPLY: {content}")
+          else:
+              print("REPLY: <no content>")
+          PY
