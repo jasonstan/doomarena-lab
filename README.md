@@ -29,6 +29,20 @@ RUN_ID=$(date -u +%Y%m%d-%H%M%S) make demo report
 
 Prefer one command? Run `make quickstart` for `install → demo → report → open-artifacts`.
 
+### Real model (first step): probe a provider
+Before wiring REAL into experiments, verify your credentials + connectivity:
+1. Copy the template and add your key (local only — never commit `.env`):
+   ```bash
+   cp .env.example .env
+   # fill GROQ_API_KEY=... (or GEMINI_API_KEY=...)
+   ```
+2. Run a probe:
+   ```bash
+   make probe-groq     # or: make probe-gemini
+   ```
+You should see `PROBE: OK` and a short model reply. In CI, set repo **Secrets**
+(e.g., `GROQ_API_KEY`) instead of using `.env`.
+
 ### Latest Results (auto)
 Local runs write the freshest artifacts directly to `results/` (updated by `make report`).
 In CI, the workflow publishes a `results/LATEST/` folder inside the run’s artifacts,
