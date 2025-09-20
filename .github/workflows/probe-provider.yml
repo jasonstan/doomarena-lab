@@ -1,0 +1,58 @@
+name: probe-provider
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: "Which provider to probe (groq|gemini)"
+        required: true
+        default: groq
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Select provider
+        id: pick
+        run: |
+          case "${{ github.event.inputs.provider }}" in
+            groq)   echo "prov=groq"   >> "$GITHUB_OUTPUT" ;;
+            gemini) echo "prov=gemini" >> "$GITHUB_OUTPUT" ;;
+            *) echo "Unknown provider"; exit 1 ;;
+          esac
+
+      - name: Probe Groq (OpenAI-compatible)
+        if: steps.pick.outputs.prov == 'groq'
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        run: |
+          if [ -z "$GROQ_API_KEY" ]; then
+            echo "Missing GROQ_API_KEY secret"; exit 1
+          fi
+          # Minimal chat prompt using Groq's OpenAI-compatible endpoint
+          BODY='{
+            "model": "mixtral-8x7b-32768",
+            "messages": [{"role":"user","content":"Reply with: GROQ_OK"}],
+            "temperature": 0
+          }'
+          curl -sS https://api.groq.com/openai/v1/chat/completions \
+            -H "Authorization: Bearer ${GROQ_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "$BODY" | tee response.json
+          # Extract a tiny snippet (best-effort)
+          node -e "console.log(require('./response.json').choices?.[0]?.message?.content?.slice(0,120) || 'NO_CONTENT')" | sed 's/^/REPLY: /'
+
+      - name: Probe Gemini (REST)
+        if: steps.pick.outputs.prov == 'gemini'
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          if [ -z "$GEMINI_API_KEY" ]; then
+            echo "Missing GEMINI_API_KEY secret"; exit 1
+          fi
+          BODY='{
+            "contents": [{"parts": [{"text": "Reply with: GEMINI_OK"}]}]
+          }'
+          curl -sS "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "$BODY" | tee response.json
+          # Extract a tiny snippet (best-effort)
+          node -e "const r=require('./response.json');console.log(r.candidates?.[0]?.content?.parts?.[0]?.text?.slice(0,120)||'NO_CONTENT')" | sed 's/^/REPLY: /'
