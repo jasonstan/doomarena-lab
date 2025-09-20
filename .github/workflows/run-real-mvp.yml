@@ -1,84 +1,66 @@
 name: run-real-mvp
+
 on:
   workflow_dispatch:
     inputs:
-      provider:
-        description: "Provider id (e.g., echo, openai_compat)"
-        required: false
-        default: "echo"
       model:
-        description: "Model id/name (provider-specific)"
-        required: false
-        default: "stub"
-      trials:
-        description: "Trials per seed"
-        required: false
-        default: "1"
-      seeds:
-        description: "Comma-separated seeds"
-        required: false
-        default: "1"
-permissions:
-  contents: read
-  actions: write
-  id-token: write
+        description: "Groq model"
+        type: choice
+        default: llama-3.1-8b-instant
+        options:
+          - llama-3.1-8b-instant
+          - llama-3.3-70b-versatile
+      prompt:
+        description: "User prompt to test"
+        type: string
+        default: "What options do I have if my flight was canceled yesterday but policy excludes weather refunds?"
+
 jobs:
-  e2e-real:
+  real:
     runs-on: ubuntu-latest
-    env:
-      # Map the API key secret to an env var your adapter will read.
-      # Example: set repository/organization secret REAL_API_KEY before running.
-      REAL_API_KEY: ${{ secrets.REAL_API_KEY }}
-      PROVIDER: ${{ inputs.provider }}
-      MODEL: ${{ inputs.model }}
-      TRIALS: ${{ inputs.trials }}
-      SEEDS: ${{ inputs.seeds }}
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Set RUN_ID (once)
-        id: set-run-id
+      - name: Install (lightweight)
         run: |
-          RUN_ID="$(date -u +%Y%m%d-%H%M%S)"
-          echo "RUN_ID=$RUN_ID" >> "$GITHUB_ENV"
-          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
-          echo "RUN_ID=$RUN_ID"
-      - name: Install
-        run: make install
-      - name: Run REAL demo (same experiments, MODE=REAL)
+          python -m venv .venv
+          . .venv/bin/activate
+          python - <<'PY'
+          # no heavy deps required
+          PY
+      - name: REAL MVP call (Groq)
         env:
-          RUN_ID: ${{ env.RUN_ID }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          REAL_MODEL: ${{ inputs.model }}
+          REAL_PROMPT: ${{ inputs.prompt }}
         run: |
-          # Adapter code will read PROVIDER/MODEL/REAL_API_KEY if it exists.
-          make demo MODE=REAL TRIALS="${TRIALS}" SEEDS="${SEEDS}" RUN_ID="${RUN_ID}"
-      - name: Report + publish LATEST
-        env:
-          RUN_ID: ${{ env.RUN_ID }}
+          . .venv/bin/activate
+          python scripts/real_mvp_run.py
+      - name: Determine RUN_ID
+        id: rid
         run: |
-          make report RUN_ID="${RUN_ID}"
-          make latest
-      - name: Tidy run directory (remove duplicates)
-        env:
-          RUN_ID: ${{ env.RUN_ID }}
-        run: |
-          make tidy-run RUN_ID="${RUN_ID}"
-      - name: Upload full RUN_DIR
+          RID="$(cat results/.run_id 2>/dev/null || true)"
+          echo "run_id=$RID" >> "$GITHUB_OUTPUT"
+          echo "RUN_ID=$RID"
+      - name: Upload run artifacts
+        if: steps.rid.outputs.run_id != ''
         uses: actions/upload-artifact@v4
         with:
-          name: run-${{ env.RUN_ID }}
-          path: results/${{ env.RUN_ID }}/
+          name: real-run-${{ steps.rid.outputs.run_id }}
+          path: results/${{ steps.rid.outputs.run_id }}/
           if-no-files-found: error
           retention-days: 7
-      - name: Upload latest artifacts
+      - name: Upload LATEST pointer files
         uses: actions/upload-artifact@v4
         with:
-          name: latest-artifacts
+          name: latest-pointer
           path: |
-            results/LATEST/summary.csv
-            results/LATEST/summary.svg
-            results/LATEST/index.html
-            results/LATEST/run.json
-          if-no-files-found: error
+            results/LATEST
+            results/LATEST.RUN_ID
+            results/.run_id
+          if-no-files-found: ignore
           retention-days: 7
