@@ -24,6 +24,8 @@ jobs:
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
         run: |
+          set -euo pipefail
+
           if [ -z "$GROQ_API_KEY" ]; then
             echo "Missing GROQ_API_KEY secret"; exit 1
           fi
@@ -33,26 +35,62 @@ jobs:
             "messages": [{"role":"user","content":"Reply with: GROQ_OK"}],
             "temperature": 0
           }'
-          curl -sS https://api.groq.com/openai/v1/chat/completions \
+          curl --fail -sS https://api.groq.com/openai/v1/chat/completions \
             -H "Authorization: Bearer ${GROQ_API_KEY}" \
             -H "Content-Type: application/json" \
-            -d "$BODY" | tee response.json
+            -d "$BODY" \
+            -o response.json
           # Extract a tiny snippet (best-effort)
-          node -e "console.log(require('./response.json').choices?.[0]?.message?.content?.slice(0,120) || 'NO_CONTENT')" | sed 's/^/REPLY: /'
+          node <<'NODE'
+const fs = require('fs');
+const res = JSON.parse(fs.readFileSync('response.json', 'utf8'));
+
+if (res.error) {
+  console.error('ERROR:', res.error.message || JSON.stringify(res.error));
+  process.exit(1);
+}
+
+const content = res.choices?.[0]?.message?.content?.trim();
+if (!content) {
+  console.error('NO_CONTENT');
+  process.exit(1);
+}
+
+console.log('REPLY:', content.slice(0, 120));
+NODE
 
       - name: Probe Gemini (REST)
         if: steps.pick.outputs.prov == 'gemini'
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
+          set -euo pipefail
+
           if [ -z "$GEMINI_API_KEY" ]; then
             echo "Missing GEMINI_API_KEY secret"; exit 1
           fi
           BODY='{
             "contents": [{"parts": [{"text": "Reply with: GEMINI_OK"}]}]
           }'
-          curl -sS "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}" \
+          curl --fail -sS "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}" \
             -H "Content-Type: application/json" \
-            -d "$BODY" | tee response.json
+            -d "$BODY" \
+            -o response.json
           # Extract a tiny snippet (best-effort)
-          node -e "const r=require('./response.json');console.log(r.candidates?.[0]?.content?.parts?.[0]?.text?.slice(0,120)||'NO_CONTENT')" | sed 's/^/REPLY: /'
+          node <<'NODE'
+const fs = require('fs');
+const res = JSON.parse(fs.readFileSync('response.json', 'utf8'));
+
+if (res.error) {
+  console.error('ERROR:', res.error.message || JSON.stringify(res.error));
+  process.exit(1);
+}
+
+const content = res.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+if (!content) {
+  console.error('NO_CONTENT');
+  process.exit(1);
+}
+
+console.log('REPLY:', content.slice(0, 120));
+NODE
