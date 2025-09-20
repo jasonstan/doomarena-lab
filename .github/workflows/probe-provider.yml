@@ -16,7 +16,7 @@ on:
       groq_model:
         description: "Groq model (OpenAI-compatible)"
         required: false
-        default: "llama-3.1-70b-versatile"
+        default: "llama-3.1-8b-instant"
 
 permissions:
   contents: read
