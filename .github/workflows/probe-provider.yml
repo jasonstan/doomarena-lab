@@ -39,41 +39,41 @@ jobs:
           MODEL: ${{ inputs.groq_model }}
           PROMPT: ${{ inputs.prompt }}
         run: |
+          set -euo pipefail
           if [ -z "$GROQ_API_KEY" ]; then
             echo "::warning::GROQ_API_KEY is not set. Add it in Settings > Secrets and variables > Actions."
             exit 0
           fi
           echo "Calling Groq model: $MODEL"
-          RESP="$(curl -sS https://api.groq.com/openai/v1/chat/completions \
+          RESP_FILE="$(mktemp /tmp/groq_response.XXXXXX.json)"
+          REPLY_TEXT="$(curl -sS https://api.groq.com/openai/v1/chat/completions \
             -H "Authorization: Bearer $GROQ_API_KEY" \
             -H "Content-Type: application/json" \
-            -d "{\"model\":\"$MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"$PROMPT\"}],\"max_tokens\":64}")" || {
-            echo "::error::curl failed"
+            -d "{\"model\":\"$MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"$PROMPT\"}],\"max_tokens\":64}" \
+            | tee "$RESP_FILE" \
+            | jq -r '
+              if .error then
+                "ERROR: " + (.error.message // .error.code // .error.type // (.error | tostring))
+              else
+                .choices[0].message.content // ""
+              end
+            ' )" || {
+            echo "::error::Failed to call Groq API"
             exit 1
           }
           echo "RAW_RESPONSE_JSON<<EOF"
-          echo "$RESP"
+          cat "$RESP_FILE"
           echo "EOF"
-          echo "$RESP" | python - <<'PY'
-          import json, sys
-
-          data = json.load(sys.stdin)
-          error = data.get("error")
-          if error:
-              print(f"ERROR: {error}")
-              sys.exit(1)
-
-          msg = None
-          choices = data.get("choices") or []
-          if choices:
-              msg = choices[0].get("message", {}).get("content")
-
-          if msg:
-              print(f"REPLY: {msg}")
-          else:
-              print("REPLY: <no content>")
-              sys.exit(1)
-          PY
+          if [ -z "$REPLY_TEXT" ]; then
+            echo "REPLY: <no content>"
+            exit 1
+          fi
+          if [ "${REPLY_TEXT#ERROR: }" != "$REPLY_TEXT" ]; then
+            echo "$REPLY_TEXT"
+            exit 1
+          fi
+          echo "REPLY: $REPLY_TEXT"
+          echo "Saved raw response to $RESP_FILE"
 
       - name: Probe Gemini (REST)
         if: ${{ inputs.provider == 'gemini' }}
