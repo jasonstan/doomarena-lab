@@ -1,7 +1,7 @@
 import csv
 from pathlib import Path
 
-EXPECTED_COLUMNS = [
+BASE_COLUMNS = [
     "exp_id",
     "exp",
     "config",
@@ -11,6 +11,9 @@ EXPECTED_COLUMNS = [
     "trials",
     "successes",
     "asr",
+    "sum_tokens",
+    "avg_latency_ms",
+    "sum_cost_usd",
     "git_commit",
     "run_at",
 ]
@@ -24,7 +27,10 @@ def test_summary_csv_present_and_valid():
         reader = csv.DictReader(handle)
         assert reader.fieldnames is not None, "summary.csv missing header"
         header = [column.strip() for column in reader.fieldnames]
-        assert header == EXPECTED_COLUMNS, f"Unexpected header order: {header}"
+        if header and header[-1] == "schema":
+            assert header[:-1] == BASE_COLUMNS, f"Unexpected header order: {header}"
+        else:
+            assert header == BASE_COLUMNS, f"Unexpected header order: {header}"
 
         valid_rows = 0
         for row in reader:

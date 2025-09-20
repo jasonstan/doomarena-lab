@@ -24,6 +24,9 @@ SUMMARY_COLUMNS: Tuple[str, ...] = (
     "trials",
     "successes",
     "asr",
+    "sum_tokens",
+    "avg_latency_ms",
+    "sum_cost_usd",
     "git_commit",
     "run_at",
 )
@@ -146,6 +149,57 @@ def _collect_seeds(header: Dict[str, Any]) -> str:
     return ",".join(ordered)
 
 
+def _collect_trial_metrics(path: Path) -> tuple[int, Optional[float], Optional[float]]:
+    total_tokens = 0
+    latency_total = 0.0
+    latency_count = 0
+    cost_total = 0.0
+    cost_present = False
+
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    payload = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(payload, dict):
+                    continue
+                if payload.get("event") != "trial":
+                    continue
+
+                total = _normalise_int(payload.get("total_tokens"))
+                if total <= 0:
+                    prompt = _normalise_int(payload.get("prompt_tokens"))
+                    completion = _normalise_int(payload.get("completion_tokens"))
+                    if prompt or completion:
+                        total = prompt + completion
+                if total > 0:
+                    total_tokens += total
+
+                latency_value = _parse_optional_float(payload.get("latency_ms"))
+                if latency_value is not None:
+                    latency_total += latency_value
+                    latency_count += 1
+
+                cost_value = _parse_optional_float(payload.get("cost_usd"))
+                if cost_value is not None:
+                    cost_total += cost_value
+                    cost_present = True
+    except OSError:
+        return 0, None, None
+
+    avg_latency: Optional[float] = None
+    if latency_count > 0:
+        avg_latency = latency_total / float(latency_count)
+
+    cost_sum: Optional[float] = cost_total if cost_present else None
+    return total_tokens, avg_latency, cost_sum
+
+
 def _load_meta(path: Path) -> Dict[str, Any] | None:
     candidates = [
         path.with_suffix(".meta.json"),
@@ -261,6 +315,16 @@ def build_row(path: Path, header: Dict[str, Any], summary: Dict[str, Any]) -> Di
     elif asr > 1.0:
         asr = 1.0
 
+    tokens_total, avg_latency, cost_sum = _collect_trial_metrics(path)
+    if tokens_total == 0:
+        tokens_total = _normalise_int(summary.get("sum_tokens"))
+    if avg_latency is None:
+        avg_latency = _parse_optional_float(summary.get("avg_latency_ms"))
+    if cost_sum is None:
+        cost_from_summary = _parse_optional_float(summary.get("sum_cost_usd"))
+        if cost_from_summary is not None:
+            cost_sum = cost_from_summary
+
     row = {
         "exp_id": exp_id,
         "exp": exp,
@@ -271,6 +335,9 @@ def build_row(path: Path, header: Dict[str, Any], summary: Dict[str, Any]) -> Di
         "trials": str(trials),
         "successes": str(successes),
         "asr": f"{asr:.6f}",
+        "sum_tokens": str(tokens_total),
+        "avg_latency_ms": f"{avg_latency:.1f}" if avg_latency is not None else "",
+        "sum_cost_usd": f"{cost_sum:.4f}" if cost_sum is not None else "",
         "git_commit": git_commit,
         "run_at": run_at,
     }
