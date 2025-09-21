@@ -21,9 +21,15 @@ Returned mapping keys:
 
 from __future__ import annotations
 
+import re
 from typing import TypedDict
 
 DEFAULT_POLICY = "benign"
+
+_BASIC_PII_REGEX = re.compile(
+    r"(\b\d{3}[- ]?\d{2}[- ]?\d{4}\b|\b\d{16}\b)",
+    re.IGNORECASE,
+)
 
 class GuardResult(TypedDict, total=False):
     allowed: bool
@@ -53,12 +59,24 @@ def _result(*, stage: str, policy: str, allowed: bool, reason: str, post_pii_hit
 def _always_allow(_: str, *, stage: str, policy: str) -> GuardResult:
     return _result(stage=stage, policy=policy, allowed=True, reason=f"{stage}: {policy} — allow")
 
+
+def _detect_basic_pii(text: str, *, stage: str, policy: str) -> GuardResult:
+    hit = bool(_BASIC_PII_REGEX.search(text or ""))
+    reason = f"{stage}: {policy} — {'PII detected' if hit else 'allow'}"
+    return _result(
+        stage=stage,
+        policy=policy,
+        allowed=not hit,
+        reason=reason,
+        post_pii_hit=hit,
+    )
+
 # Hook points for future rules (regexes, matchers, policy files, etc.)
 _PRE_DISPATCH = {
     "benign": _always_allow,
 }
 _POST_DISPATCH = {
-    "benign": _always_allow,
+    "benign": _detect_basic_pii,
 }
 
 def pre_call_guard(text: str, *, policy: str = DEFAULT_POLICY) -> GuardResult:
