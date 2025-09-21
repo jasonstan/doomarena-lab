@@ -16,9 +16,10 @@ on:
         required: true
         default: "41,42"
 
-# We only read the repo; no token write needed to upload artifacts
+# Need write to publish artifacts; keep repo read
 permissions:
   contents: read
+  actions: write
 
 jobs:
   real:
@@ -37,46 +38,56 @@ jobs:
       - name: Install
         run: make install
 
-      - name: Real risky run + report
+      - name: REAL run (set RUN_ID, execute, publish)
+        id: real
+        shell: bash
         env:
           REAL_MODEL: ${{ inputs.model }}
           TRIALS: ${{ inputs.trials }}
           SEEDS: ${{ inputs.seeds }}
         run: |
           set -euo pipefail
-          # Single RUN_ID for this workflow trigger
+
+          # Single RUN_ID for the whole session
           RUN_ID="$(date -u '+%Y%m%d-%H%M%S')"
-          export RUN_ID
           echo "$RUN_ID" > results/.run_id
+          echo "RUN_ID=$RUN_ID" >> "$GITHUB_ENV"
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
 
-          # Run experiment and publish report (copies artifacts to results/)
+          # Execute the REAL risky run (Groq) via make
+          # Target should read REAL_MODEL/TRIALS/SEEDS from env and honor RUN_ID
           make real-tau-risky TRIALS="${TRIALS}" SEEDS="${SEEDS}" REAL_MODEL="${REAL_MODEL}"
+
+          # Create report & update LATEST marker
           make report RUN_ID="${RUN_ID}"
+          make latest
 
-      - name: Determine RUN_ID
-        id: rid
-        run: |
-          RID="$(cat results/.run_id 2>/dev/null || true)"
-          echo "run_id=$RID" >> "$GITHUB_OUTPUT"
-          echo "RUN_ID=$RID"
+          # Basic integrity checks (fail fast if broken)
+          test -s "results/${RUN_ID}/summary.svg"
+          test -s "results/${RUN_ID}/index.html"
 
-      - name: Upload full RUN_DIR
-        if: steps.rid.outputs.run_id != ''
+      - name: Upload per-run artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: run-${{ steps.rid.outputs.run_id }}
-          path: results/${{ steps.rid.outputs.run_id }}/
+          name: run-${{ steps.real.outputs.run_id || 'current' }}
+          path: |
+            results/${{ env.RUN_ID }}/summary.csv
+            results/${{ env.RUN_ID }}/summary.svg
+            results/${{ env.RUN_ID }}/index.html
+            results/${{ env.RUN_ID }}/run.json
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 7
 
-      - name: Upload root artifacts (latest)
+      - name: Upload latest artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: latest-artifacts
           path: |
-            results/summary.csv
-            results/summary.svg
-            results/index.html
-            results/run.json
-          if-no-files-found: warn
-          retention-days: 14
+            results/LATEST/summary.csv
+            results/LATEST/summary.svg
+            results/LATEST/index.html
+            results/LATEST/run.json
+          if-no-files-found: error
+          retention-days: 7
