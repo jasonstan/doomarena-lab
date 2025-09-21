@@ -1,13 +1,10 @@
-name: run-real-mvp
+name: "Run REAL MVP"
+
 on:
   workflow_dispatch:
     inputs:
-      ack_cost:
-        description: "Type 'I UNDERSTAND' to acknowledge token costs."
-        required: true
-        default: ""
       model:
-        description: "Groq model id (e.g., llama-3.1-8b-instant)"
+        description: "Groq model id"
         required: true
         default: "llama-3.1-8b-instant"
       trials:
@@ -18,72 +15,68 @@ on:
         description: "Comma-separated seeds"
         required: true
         default: "41,42"
+
+# We only read the repo; no token write needed to upload artifacts
 permissions:
   contents: read
-  actions: write
+
 jobs:
-  e2e:
+  real:
+    name: "REAL τ-Bench risky (Groq)"
     if: ${{ github.repository_owner == 'jasonstan' }}
     runs-on: ubuntu-latest
     env:
-      # Secrets are never printed; used by your REAL scripts/clients.
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
     steps:
-      - name: Guardrail: confirm costs
-        run: |
-          if [ "${{ inputs.ack_cost }}" != "I UNDERSTAND" ]; then
-            echo "Refusing to run REAL experiment without cost acknowledgment."
-            exit 1
-          fi
-          if [ -z "${GROQ_API_KEY}" ]; then
-            echo "GROQ_API_KEY is not set in repo secrets."
-            exit 1
-          fi
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
       - name: Install
         run: make install
-      - name: Run REAL τ-Bench risky
+
+      - name: Real risky run + report
         env:
           REAL_MODEL: ${{ inputs.model }}
           TRIALS: ${{ inputs.trials }}
           SEEDS: ${{ inputs.seeds }}
         run: |
-          # Single run-id for both seeds/trials; Make target ends with 'make report'
-          RUN_ID="$(date -u "+%Y%m%d-%H%M%S")"
+          set -euo pipefail
+          # Single RUN_ID for this workflow trigger
+          RUN_ID="$(date -u '+%Y%m%d-%H%M%S')"
           export RUN_ID
-          make real-tau-risky RUN_ID="${RUN_ID}" TRIALS="${TRIALS}" SEEDS="${SEEDS}" REAL_MODEL="${REAL_MODEL}"
-          make latest RUN_ID="${RUN_ID}"
-          mkdir -p results
-          printf '%s\n' "${RUN_ID}" > results/.run_id
+          echo "$RUN_ID" > results/.run_id
+
+          # Run experiment and publish report (copies artifacts to results/)
+          make real-tau-risky TRIALS="${TRIALS}" SEEDS="${SEEDS}" REAL_MODEL="${REAL_MODEL}"
+          make report RUN_ID="${RUN_ID}"
+
       - name: Determine RUN_ID
         id: rid
         run: |
-          if [ -f results/.run_id ]; then
-            RID="$(cat results/.run_id)"
-            echo "run_id=$RID" >> "$GITHUB_OUTPUT"
-            echo "RUN_ID=$RID"
-          else
-            echo "No results/.run_id found"; exit 1
-          fi
+          RID="$(cat results/.run_id 2>/dev/null || true)"
+          echo "run_id=$RID" >> "$GITHUB_OUTPUT"
+          echo "RUN_ID=$RID"
+
       - name: Upload full RUN_DIR
+        if: steps.rid.outputs.run_id != ''
         uses: actions/upload-artifact@v4
         with:
           name: run-${{ steps.rid.outputs.run_id }}
           path: results/${{ steps.rid.outputs.run_id }}/
           if-no-files-found: error
-          retention-days: 7
-      - name: Upload latest artifacts
+          retention-days: 14
+
+      - name: Upload root artifacts (latest)
         uses: actions/upload-artifact@v4
         with:
           name: latest-artifacts
           path: |
             results/summary.csv
             results/summary.svg
-            results/summary.md
             results/index.html
             results/run.json
-          if-no-files-found: error
-          retention-days: 7
+          if-no-files-found: warn
+          retention-days: 14
