@@ -66,6 +66,42 @@ jobs:
           test -s "results/${RUN_ID}/summary.svg"
           test -s "results/${RUN_ID}/index.html"
 
+      - name: Diagnose outputs (list RUN_DIR and preview CSV)
+        if: always()
+        run: |
+          RID="${RUN_ID:-}"
+          if [ -z "$RID" ] && [ -f results/.run_id ]; then
+            RID="$(cat results/.run_id)"
+          fi
+
+          if [ -n "$RID" ]; then
+            echo "RUN_ID=$RID"
+          else
+            echo "RUN_ID not available"
+          fi
+
+          echo
+
+          if [ -n "$RID" ] && [ -d "results/$RID" ]; then
+            echo "Tree of results/$RID (max depth 2):"
+            find "results/$RID" -maxdepth 2 -type f -print | sort || true
+
+            echo
+            echo "Summary CSV (first 10 lines):"
+            if [ -f "results/$RID/summary.csv" ]; then
+              head -n 10 "results/$RID/summary.csv" || true
+              echo
+              echo "Line count:"
+              wc -l "results/$RID/summary.csv" || true
+            else
+              echo "results/$RID/summary.csv not found"
+            fi
+          elif [ -n "$RID" ]; then
+            echo "Run directory results/$RID not found"
+          else
+            echo "Run directory could not be determined"
+          fi
+
       - name: Upload per-run artifacts
         if: always()
         uses: actions/upload-artifact@v4
