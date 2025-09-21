@@ -62,9 +62,6 @@ jobs:
           make report RUN_ID="${RUN_ID}"
           make latest
 
-          # Basic integrity checks (fail fast if broken)
-          test -s "results/${RUN_ID}/summary.svg"
-          test -s "results/${RUN_ID}/index.html"
 
       - name: Verify REAL artifacts
         run: |

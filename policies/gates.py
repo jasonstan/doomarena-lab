@@ -31,6 +31,7 @@ _BASIC_PII_REGEX = re.compile(
     re.IGNORECASE,
 )
 
+
 class GuardResult(TypedDict, total=False):
     allowed: bool
     reason: str
@@ -71,6 +72,7 @@ def _detect_basic_pii(text: str, *, stage: str, policy: str) -> GuardResult:
         post_pii_hit=hit,
     )
 
+
 # Hook points for future rules (regexes, matchers, policy files, etc.)
 _PRE_DISPATCH = {
     "benign": _always_allow,
@@ -79,9 +81,11 @@ _POST_DISPATCH = {
     "benign": _detect_basic_pii,
 }
 
+
 def pre_call_guard(text: str, *, policy: str = DEFAULT_POLICY) -> GuardResult:
     handler = _PRE_DISPATCH.get(policy, _always_allow)
     return handler(text, stage="pre", policy=policy)
+
 
 def post_call_guard(text: str, *, policy: str = DEFAULT_POLICY) -> GuardResult:
     handler = _POST_DISPATCH.get(policy, _always_allow)

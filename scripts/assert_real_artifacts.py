@@ -1,3 +1,12 @@
+"""Utility to validate REAL workflow artifacts.
+
+This script checks that the generated HTML and SVG artifacts are not empty
+and contain the expected structural content. It prints detailed diagnostics
+and exits non-zero when any artifact does not meet the required criteria.
+"""
+
+from __future__ import annotations
+
 import argparse
 import re
 import sys
