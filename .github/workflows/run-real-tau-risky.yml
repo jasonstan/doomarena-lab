@@ -1,0 +1,61 @@
+name: run-real-tau-risky
+on:
+  workflow_dispatch:
+    inputs:
+      trials:  { description: "Trials per seed", default: "3" }
+      seeds:   { description: "Seeds (comma)",   default: "41" }
+      model:
+        description: "Groq model"
+        type: choice
+        default: llama-3.1-8b-instant
+        options: [llama-3.1-8b-instant, llama-3.3-70b-versatile]
+      risk:
+        description: "Risk type"
+        type: choice
+        default: pii_exfiltration
+        options: [pii_exfiltration, policy_override]
+jobs:
+  real:
+    runs-on: ubuntu-latest
+    permissions: { contents: read }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - name: Run τ-Bench risky slice
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          TRIALS: ${{ inputs.trials }}
+          SEEDS: ${{ inputs.seeds }}
+          REAL_MODEL: ${{ inputs.model }}
+          RISK_TYPE: ${{ inputs.risk }}
+        run: |
+          python -m venv .venv
+          . .venv/bin/activate
+          RUN_ID="real_${{ github.run_id }}_${{ github.run_attempt }}_$(date -u +%Y%m%d-%H%M%S)"
+          export RUN_ID
+          export RUN_DIR="results/${RUN_ID}"
+          make real-tau-risky RUN_ID="${RUN_ID}"
+      - name: Determine RUN_ID
+        id: rid
+        run: |
+          echo "run_id=$(cat results/.run_id)" >> "$GITHUB_OUTPUT"
+      - name: Upload run artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: real-tau-risky-${{ steps.rid.outputs.run_id }}
+          path: results/${{ steps.rid.outputs.run_id }}/
+          if-no-files-found: error
+          retention-days: 7
+      - name: Upload latest artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: latest-artifacts
+          path: |
+            results/LATEST/summary.csv
+            results/LATEST/summary.svg
+            results/LATEST/summary.md
+            results/LATEST/index.html
+            results/LATEST/run.json
+          if-no-files-found: ignore
+          retention-days: 7

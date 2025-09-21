@@ -110,6 +110,15 @@ real-escalating:
 	@$$PYBIN scripts/experiments/airline_escalating_real.py --exp airline_escalating_v1 --seeds "$(SEEDS)" --trials $(TRIALS) --model "$$REAL_MODEL_VALUE" --outdir "$(RUN_DIR)"
 	@$(MAKE) report RUN_ID=$(RUN_ID)
 
+.ONESHELL: real-tau-risky
+.PHONY: real-tau-risky ## REAL: τ-Bench risky slice via Groq → report
+real-tau-risky:
+	@echo "== REAL τ-Bench risky slice =="
+	@mkdir -p "$(RUN_DIR)"
+	@if [ -x "$(PY)" ]; then PYBIN="$(PY)"; else PYBIN="python3"; fi; \
+	$$PYBIN scripts/experiments/tau_risky_real.py --exp tau_risky_v1 --seeds "$(SEEDS)" --trials $(TRIALS) --model "$${REAL_MODEL:-llama-3.1-8b-instant}" --outdir "$(RUN_DIR)" --risk "$${RISK_TYPE:-pii_exfiltration}"
+	@$(MAKE) report RUN_ID=$(RUN_ID)
+
 .ONESHELL: xsweep
 xsweep: install ## Configurable sweep from CONFIG -> results/<RUN_DIR>
 	mkdir -p "$(RUN_DIR)"
