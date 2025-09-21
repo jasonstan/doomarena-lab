@@ -50,6 +50,7 @@ jobs:
 
           # Single RUN_ID for the whole session
           RUN_ID="$(date -u '+%Y%m%d-%H%M%S')"
+          export RUN_ID
           echo "$RUN_ID" > results/.run_id
           echo "RUN_ID=$RUN_ID" >> "$GITHUB_ENV"
           echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
