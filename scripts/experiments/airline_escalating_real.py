@@ -95,63 +95,108 @@ def run_seed(exp: str, run_dir: Path, seed: int, trials: int, model: str) -> Dic
     pout = float(os.getenv("GROQ_PRICE_OUT_PER_1K", "0") or 0.0)
 
     for trial_idx in range(1, trials + 1):
-        level = LEVELS[(trial_idx - 1) % len(LEVELS)]
-        messages = [
-            {"role": "system", "content": SYSTEM},
-            {"role": "user", "content": level},
-        ]
-        reply, raw = chat(messages=messages, model=model)
-        usage = raw.get("usage", {}) if isinstance(raw, dict) else {}
-        telemetry = raw.get("_telemetry") if isinstance(raw, dict) else None
+        messages = [{"role": "system", "content": SYSTEM}]
+        trial_success = True
+        conversation: List[Dict[str, object]] = []
+        trial_prompt_tokens = 0
+        trial_completion_tokens = 0
+        trial_total_tokens = 0
+        trial_latencies: List[float] = []
+        trial_costs: List[Optional[float]] = []
 
-        prompt_tokens = int(usage.get("prompt_tokens") or 0)
-        completion_tokens = int(usage.get("completion_tokens") or 0)
-        total_tokens = int(usage.get("total_tokens") or 0)
-        if total_tokens <= 0 and (prompt_tokens or completion_tokens):
-            total_tokens = prompt_tokens + completion_tokens
+        for level_idx, level in enumerate(LEVELS, start=1):
+            messages.append({"role": "user", "content": level})
+            reply, raw = chat(messages=messages, model=model)
+            messages.append({"role": "assistant", "content": reply})
 
-        if total_tokens > 0:
-            total_tokens_all += total_tokens
-        elif prompt_tokens or completion_tokens:
-            total_tokens_all += prompt_tokens + completion_tokens
+            usage = raw.get("usage", {}) if isinstance(raw, dict) else {}
+            telemetry = raw.get("_telemetry") if isinstance(raw, dict) else None
 
-        latency_ms: Optional[float] = None
-        if isinstance(telemetry, dict):
-            latency_raw = telemetry.get("latency_ms")
-            if latency_raw is not None:
-                try:
-                    latency_ms = float(latency_raw)
-                except (TypeError, ValueError):
-                    latency_ms = None
-        if latency_ms is not None:
-            latency_values.append(latency_ms)
+            prompt_tokens = int(usage.get("prompt_tokens") or 0)
+            completion_tokens = int(usage.get("completion_tokens") or 0)
+            total_tokens = int(usage.get("total_tokens") or 0)
+            if total_tokens <= 0 and (prompt_tokens or completion_tokens):
+                total_tokens = prompt_tokens + completion_tokens
 
-        cost_usd: Optional[float] = None
-        if pin or pout:
-            cost_usd = round((prompt_tokens / 1000.0) * pin + (completion_tokens / 1000.0) * pout, 6)
-            costs.append(cost_usd)
-        else:
-            costs.append(None)
+            trial_prompt_tokens += prompt_tokens
+            trial_completion_tokens += completion_tokens
 
-        success = refusal_heuristic(reply)
-        if success:
+            if total_tokens > 0:
+                trial_total_tokens += total_tokens
+                total_tokens_all += total_tokens
+            elif prompt_tokens or completion_tokens:
+                fallback_total = prompt_tokens + completion_tokens
+                trial_total_tokens += fallback_total
+                total_tokens_all += fallback_total
+
+            latency_ms: Optional[float] = None
+            if isinstance(telemetry, dict):
+                latency_raw = telemetry.get("latency_ms")
+                if latency_raw is not None:
+                    try:
+                        latency_ms = float(latency_raw)
+                    except (TypeError, ValueError):
+                        latency_ms = None
+            if latency_ms is not None:
+                latency_values.append(latency_ms)
+                trial_latencies.append(latency_ms)
+
+            cost_usd: Optional[float] = None
+            if pin or pout:
+                cost_usd = round(
+                    (prompt_tokens / 1000.0) * pin + (completion_tokens / 1000.0) * pout,
+                    6,
+                )
+                costs.append(cost_usd)
+                trial_costs.append(cost_usd)
+            else:
+                costs.append(None)
+                trial_costs.append(None)
+
+            refusal = refusal_heuristic(reply)
+            trial_success = trial_success and refusal
+
+            conversation.append(
+                {
+                    "level_index": level_idx,
+                    "level": level,
+                    "reply": reply,
+                    "success": refusal,
+                    "prompt_tokens": prompt_tokens or None,
+                    "completion_tokens": completion_tokens or None,
+                    "total_tokens": total_tokens or None,
+                    "latency_ms": latency_ms,
+                    "cost_usd": cost_usd,
+                }
+            )
+
+            if not refusal:
+                break
+
+        if trial_success:
             successes += 1
+
+        total_cost_usd = _sum(trial_costs)
+        if total_cost_usd is not None:
+            total_cost_usd = round(total_cost_usd, 6)
 
         record = {
             "event": "trial",
             "exp": exp,
             "seed": seed,
             "trial": trial_idx,
-            "level": level,
-            "success": success,
+            "level": conversation[-1]["level"] if conversation else None,
+            "success": trial_success,
             "provider": "groq",
             "model": model,
-            "prompt_tokens": prompt_tokens or None,
-            "completion_tokens": completion_tokens or None,
-            "total_tokens": total_tokens or None,
-            "latency_ms": latency_ms,
-            "cost_usd": cost_usd,
-            "reply": reply,
+            "prompt_tokens": trial_prompt_tokens or None,
+            "completion_tokens": trial_completion_tokens or None,
+            "total_tokens": trial_total_tokens or None,
+            "latency_ms": trial_latencies[-1] if trial_latencies else None,
+            "avg_latency_ms": (sum(trial_latencies) / len(trial_latencies)) if trial_latencies else None,
+            "cost_usd": total_cost_usd,
+            "reply": conversation[-1]["reply"] if conversation else None,
+            "turns": conversation,
         }
         _write(path, record)
 
