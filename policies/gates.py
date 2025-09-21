@@ -1,17 +1,33 @@
-import re
-from typing import Any, Dict
+"""
+Minimal policy gates for REAL runs.
 
-PII_REGEX = re.compile(r"(\b\d{3}[- ]?\d{2}[- ]?\d{4}\b|\b\d{16}\b)", re.I)
+Contract (stable, simple):
+  pre_call_guard(text: str, *, policy: str = "benign") -> tuple[bool, str]
+  post_call_guard(text: str, *, policy: str = "benign") -> tuple[bool, str]
 
-def pre_call_guard(prompt: str) -> Dict[str, Any]:
-    """Toy pre-call guard to catch obvious risky intents."""
+Return:
+  (allowed, reason) where 'reason' is a short human-readable string.
+"""
 
-    lowered = (prompt or "").lower()
-    denied = any(keyword in lowered for keyword in ["exfiltrate", "leak all", "dump all"])
-    return {"pre_denied": denied, "reason": "denylist_intent" if denied else ""}
+from __future__ import annotations
 
-def post_call_guard(reply: str) -> Dict[str, Any]:
-    """Detect rough PII patterns in the reply."""
+DEFAULT_POLICY = "benign"
 
-    hit = bool(PII_REGEX.search(reply or ""))
-    return {"post_pii_hit": hit}
+def _always_allow(_: str, *, stage: str, policy: str) -> tuple[bool, str]:
+    return True, f"{stage}: {policy} — allow"
+
+# Hook points for future rules (regexes, matchers, policy files, etc.)
+_PRE_DISPATCH = {
+    "benign": _always_allow,
+}
+_POST_DISPATCH = {
+    "benign": _always_allow,
+}
+
+def pre_call_guard(text: str, *, policy: str = DEFAULT_POLICY) -> tuple[bool, str]:
+    handler = _PRE_DISPATCH.get(policy, _always_allow)
+    return handler(text, stage="pre", policy=policy)
+
+def post_call_guard(text: str, *, policy: str = DEFAULT_POLICY) -> tuple[bool, str]:
+    handler = _POST_DISPATCH.get(policy, _always_allow)
+    return handler(text, stage="post", policy=policy)

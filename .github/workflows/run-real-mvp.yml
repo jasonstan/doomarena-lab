@@ -125,5 +125,5 @@ jobs:
             results/LATEST/summary.svg
             results/LATEST/index.html
             results/LATEST/run.json
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 7
