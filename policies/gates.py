@@ -1,9 +1,9 @@
 """Minimal policy gates for REAL runs.
 
 These helpers keep the original dictionary-based contract that other parts of
-the codebase rely on. Both guard functions return a mapping with stable keys so
-callers can continue to use ``dict.get`` without breaking when the
-implementation changes underneath them.
+the codebase rely on while preserving the existing safety behaviour. Both guard
+functions return a mapping with stable keys so callers can continue to use
+``dict.get`` without breaking when the implementation changes underneath them.
 
 Contract (stable):
   ``pre_call_guard(text: str, *, policy: str = "benign") -> GuardResult``
@@ -21,9 +21,14 @@ Returned mapping keys:
 
 from __future__ import annotations
 
-from typing import TypedDict
+import re
+from typing import Tuple, TypedDict
 
 DEFAULT_POLICY = "benign"
+
+_DENYLIST_KEYWORDS: Tuple[str, ...] = ("exfiltrate", "leak all", "dump all")
+_PII_REGEX = re.compile(r"(\b\d{3}[- ]?\d{2}[- ]?\d{4}\b|\b\d{13,19}\b)", re.IGNORECASE)
+
 
 class GuardResult(TypedDict, total=False):
     allowed: bool
@@ -53,17 +58,40 @@ def _result(*, stage: str, policy: str, allowed: bool, reason: str, post_pii_hit
 def _always_allow(_: str, *, stage: str, policy: str) -> GuardResult:
     return _result(stage=stage, policy=policy, allowed=True, reason=f"{stage}: {policy} — allow")
 
+
+def _denylist_pre_guard(text: str, *, stage: str, policy: str) -> GuardResult:
+    lowered = (text or "").lower()
+    if any(keyword in lowered for keyword in _DENYLIST_KEYWORDS):
+        return _result(stage=stage, policy=policy, allowed=False, reason="pre: denylist intent")
+    return _always_allow(text, stage=stage, policy=policy)
+
+
+def _pii_post_guard(text: str, *, stage: str, policy: str) -> GuardResult:
+    hit = bool(_PII_REGEX.search(text or ""))
+    if hit:
+        return _result(
+            stage=stage,
+            policy=policy,
+            allowed=False,
+            reason="post: possible PII detected",
+            post_pii_hit=True,
+        )
+    return _always_allow(text, stage=stage, policy=policy)
+
+
 # Hook points for future rules (regexes, matchers, policy files, etc.)
 _PRE_DISPATCH = {
-    "benign": _always_allow,
+    "benign": _denylist_pre_guard,
 }
 _POST_DISPATCH = {
-    "benign": _always_allow,
+    "benign": _pii_post_guard,
 }
+
 
 def pre_call_guard(text: str, *, policy: str = DEFAULT_POLICY) -> GuardResult:
     handler = _PRE_DISPATCH.get(policy, _always_allow)
     return handler(text, stage="pre", policy=policy)
+
 
 def post_call_guard(text: str, *, policy: str = DEFAULT_POLICY) -> GuardResult:
     handler = _POST_DISPATCH.get(policy, _always_allow)
