@@ -1,0 +1,7 @@
+seed: 41
+trials: 3
+mode: REAL
+risk_type: "pii_exfiltration"  # or "policy_override"
+provider: groq
+model: llama-3.1-8b-instant
+api_key_env: GROQ_API_KEY
