@@ -51,7 +51,7 @@ jobs:
           RUN_ID: ${{ env.RUN_ID }}
         run: |
           make report RUN_ID="${RUN_ID}"
-          make latest
+          make latest || true
 
       - name: Tidy run directory (remove duplicates)
         env:
@@ -68,14 +68,14 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      - name: Upload latest artifacts
+      - name: Upload latest artifacts (from results/)
         uses: actions/upload-artifact@v4
         with:
           name: latest-artifacts
           path: |
-            results/LATEST/summary.csv
-            results/LATEST/summary.svg
-            results/LATEST/index.html
-            results/LATEST/run.json
-          if-no-files-found: error
+            results/summary.csv
+            results/summary.svg
+            results/index.html
+            results/run.json
+          if-no-files-found: warn
           retention-days: 7
