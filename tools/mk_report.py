@@ -73,7 +73,10 @@ def write_report(run_dir: Path):
     meta_html = "<div class='meta'>" + " · ".join(meta_rows) + "</div>"
 
     html_doc = f"""<!doctype html>
-    <meta charset="utf-8">
+<html lang=\"en\">
+  <head>
+    <meta charset=\"utf-8\">
+    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">
     <title>DoomArena-Lab Run Report — {run_id}</title>
     <style>
       body{{font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin:24px;}}
@@ -84,14 +87,18 @@ def write_report(run_dir: Path):
       th{{background:#f6f6f6; text-align:left}}
       code{{background:#f2f2f2; padding:2px 4px; border-radius:4px}}
     </style>
+  </head>
+  <body>
     <h1>DoomArena-Lab Run Report</h1>
     {meta_html}
     <h2>Summary chart</h2>
     {svg_tag}
     <h2>Summary table</h2>
     {table_html}
-    <p class="meta">Files: <code>summary.csv</code> · <code>summary.svg</code> · <code>run.json</code></p>
-    """
+    <p class=\"meta\">Files: <code>summary.csv</code> · <code>summary.svg</code> · <code>run.json</code></p>
+  </body>
+</html>
+"""
     output = run_dir / "index.html"
     output.write_text(html_doc, encoding="utf-8")
     print(f"Wrote {output}")
