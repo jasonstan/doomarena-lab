@@ -62,9 +62,14 @@ jobs:
           make report RUN_ID="${RUN_ID}"
           make latest
 
-          # Basic integrity checks (fail fast if broken)
-          test -s "results/${RUN_ID}/summary.svg"
-          test -s "results/${RUN_ID}/index.html"
+
+      - name: Verify REAL artifacts
+        run: |
+          python scripts/assert_real_artifacts.py \
+            --html "results/${RUN_ID}/index.html" \
+            --html "results/LATEST/index.html" \
+            --svg "results/${RUN_ID}/summary.svg" \
+            --svg "results/LATEST/summary.svg"
 
       - name: Diagnose outputs (list RUN_DIR and preview CSV)
         if: always()
