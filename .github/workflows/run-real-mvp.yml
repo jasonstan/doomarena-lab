@@ -1,4 +1,5 @@
-name: run-real-mvp
+name: Run REAL MVP
+
 on:
   workflow_dispatch:
     inputs:
@@ -18,15 +19,16 @@ on:
         description: "Comma-separated seeds"
         required: true
         default: "41,42"
+
 permissions:
   contents: read
-  actions: read
+
 jobs:
-  e2e:
+  real:
+    name: "REAL τ-Bench risky (Groq)"
     if: ${{ github.repository_owner == 'jasonstan' }}
     runs-on: ubuntu-latest
     env:
-      # Secrets are never printed; used by your REAL scripts/clients.
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
     steps:
       - name: Guardrail: confirm costs
@@ -51,19 +53,15 @@ jobs:
           TRIALS: ${{ inputs.trials }}
           SEEDS: ${{ inputs.seeds }}
         run: |
-          # Single run-id for both seeds/trials; Make target ends with 'make report'
           make real-tau-risky TRIALS="${TRIALS}" SEEDS="${SEEDS}" REAL_MODEL="${REAL_MODEL}"
           make latest
       - name: Determine RUN_ID
         id: rid
         run: |
-          if [ -f results/.run_id ]; then
-            RID="$(cat results/.run_id)"
-            echo "run_id=$RID" >> "$GITHUB_OUTPUT"
-            echo "RUN_ID=$RID"
-          else
-            echo "No results/.run_id found"; exit 1
-          fi
+          test -f results/.run_id || { echo "No results/.run_id found"; exit 1; }
+          RID="$(cat results/.run_id)"
+          echo "run_id=$RID" >> "$GITHUB_OUTPUT"
+          echo "RUN_ID=$RID"
       - name: Upload full RUN_DIR
         uses: actions/upload-artifact@v4
         with:
