@@ -682,6 +682,7 @@ def main() -> None:
     summary_path = base_dir / "summary.csv"
 
     jsonl_files = sorted(base_dir.rglob("*.jsonl"))
+    empty_reason: Optional[str] = None
     if not jsonl_files:
         # Fallback: search one level up for legacy layouts
         parent_dir = base_dir.parent
@@ -693,6 +694,11 @@ def main() -> None:
                 except ValueError:
                     fallback.append(candidate)
         jsonl_files = sorted(fallback)
+        if not jsonl_files:
+            empty_reason = (
+                f"No usable rows in summary data — no *.jsonl files found under {base_dir}"
+            )
+            print(empty_reason)
 
     new_rows: List[Dict[str, str]] = []
     for path in jsonl_files:
@@ -718,6 +724,12 @@ def main() -> None:
     write_summary(summary_path, combined_rows)
     write_summary_md(base_dir, combined_rows)
     write_run_notes(base_dir, combined_rows)
+
+    if not combined_rows:
+        if empty_reason is None:
+            empty_reason = f"No usable rows in summary data — produced 0 rows under {base_dir}"
+            print(empty_reason)
+        sys.exit(3)
 
 
 if __name__ == "__main__":
