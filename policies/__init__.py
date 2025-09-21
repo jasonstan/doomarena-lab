@@ -1,1 +1,2 @@
-"""Safety gate helpers for REAL τ-Bench experiments."""
+# Lightweight policy package marker.
+# Future: versioned policies, named policies, and audit logs.
