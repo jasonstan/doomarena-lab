@@ -21,7 +21,7 @@ jobs:
         run: |
           set -euo pipefail
           echo "Scanning tracked files for Git conflict markers..."
-          if git grep -nE '^(<{7}|={7}|>{7})' --color=never; then
+          if git grep --color=never -nE '^(<{7}|={7}|>{7})'; then
             echo "::error title=Conflict markers detected::Resolve all <<<<<<< ======= >>>>>>> sections before merging."
             exit 1
           fi
