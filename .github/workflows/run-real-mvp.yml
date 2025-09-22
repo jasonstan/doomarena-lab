@@ -15,6 +15,44 @@ on:
         description: "Comma-separated seeds"
         required: true
         default: "41,42"
+      max_trails:
+        description: "Optional max-trials override (typo-safe input)"
+        required: false
+        default: ""
+      max_trials:
+        description: "Optional cap on callable trials"
+        required: false
+        default: ""
+      max_total_tokens:
+        description: "Optional run-level total token ceiling"
+        required: false
+        default: ""
+      max_prompt_tokens:
+        description: "Optional prompt token ceiling"
+        required: false
+        default: ""
+      max_completion_tokens:
+        description: "Optional completion token ceiling"
+        required: false
+        default: ""
+      max_calls:
+        description: "Optional provider call cap"
+        required: false
+        default: ""
+      temperature:
+        description: "Optional sampling temperature override"
+        required: false
+        default: ""
+      dry_run:
+        description: "Skip provider calls (dry run)"
+        required: false
+        type: boolean
+        default: false
+      fail_on_budget:
+        description: "Exit non-zero when a budget limit is hit"
+        required: false
+        type: boolean
+        default: false
 
 # Need write to publish artifacts; keep repo read
 permissions:
@@ -70,6 +108,34 @@ jobs:
 
           # Execute the REAL risky run (Groq) via make
           # Target should read REAL_MODEL/TRIALS/SEEDS from env and honor RUN_ID
+          MAX_TRAILS_INPUT="${{ inputs.max_trails }}"
+          MAX_TRIALS_INPUT="${{ inputs.max_trials }}"
+          if [ -n "$MAX_TRAILS_INPUT" ]; then
+            export MAX_TRIALS="$MAX_TRAILS_INPUT"
+          elif [ -n "$MAX_TRIALS_INPUT" ]; then
+            export MAX_TRIALS="$MAX_TRIALS_INPUT"
+          fi
+          if [ -n "${{ inputs.max_total_tokens }}" ]; then
+            export MAX_TOTAL_TOKENS="${{ inputs.max_total_tokens }}"
+          fi
+          if [ -n "${{ inputs.max_prompt_tokens }}" ]; then
+            export MAX_PROMPT_TOKENS="${{ inputs.max_prompt_tokens }}"
+          fi
+          if [ -n "${{ inputs.max_completion_tokens }}" ]; then
+            export MAX_COMPLETION_TOKENS="${{ inputs.max_completion_tokens }}"
+          fi
+          if [ -n "${{ inputs.max_calls }}" ]; then
+            export MAX_CALLS="${{ inputs.max_calls }}"
+          fi
+          if [ -n "${{ inputs.temperature }}" ]; then
+            export TEMPERATURE="${{ inputs.temperature }}"
+          fi
+          if [ "${{ inputs.dry_run }}" = 'true' ]; then
+            export DRY_RUN=1
+          fi
+          if [ "${{ inputs.fail_on_budget }}" = 'true' ]; then
+            export FAIL_ON_BUDGET=1
+          fi
           make real-tau-risky TRIALS="${TRIALS}" SEEDS="${SEEDS}" REAL_MODEL="${REAL_MODEL}"
 
           # Create report & update LATEST marker

@@ -62,6 +62,28 @@ results/LATEST/{summary.csv,summary.svg,index.html}
 - Provide **SHIM** simulation adapters for deterministic demos and a **REAL** path to cloud models.
 - Keep runs **cheap, auditable, and explainable** (governance signals + metrics).
 
+### Cost & volume controls
+- `--max-trials` — optional cap on callable trials (defaults to `--trials` value)
+- `--max-total-tokens` — run-level total token ceiling (default `100000`)
+- `--max-prompt-tokens` — prompt token ceiling (default `80000`)
+- `--max-completion-tokens` — completion token ceiling (default `40000`)
+- `--max-calls` — cap provider calls for the run (no cap by default)
+- `--temperature` — sampling temperature (default `0.2`)
+- `--dry-run` — exercise gating/bookkeeping without calling the provider
+- `--fail-on-budget` — exit non-zero if any ceiling is reached
+
+Example:
+
+```
+python -m scripts.experiments.tau_risky_real \
+  --trials 6 \
+  --max-total-tokens 5000 \
+  --max-calls 2 \
+  --fail-on-budget
+```
+
+The GitHub Action exposes the same inputs (`max_trails`/`max_trials`, `max_total_tokens`, `max_prompt_tokens`, `max_completion_tokens`, `max_calls`, `temperature`, `dry_run`, `fail_on_budget`). Run outputs include a single `BUDGET:` line plus budget usage in `run.json`, `summary.csv`, and `index.html`.
+
 ## Artifacts & schema
 - Each run writes to `results/<RUN_ID>/`; convenience copies go to `results/LATEST/*`.
 - Canonical files in `results/<RUN_ID>/`:

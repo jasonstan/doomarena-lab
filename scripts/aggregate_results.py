@@ -42,6 +42,12 @@ SUMMARY_COLUMNS: Tuple[str, ...] = (
     "post_warn",
     "post_deny",
     "top_reason",
+    "calls_made",
+    "tokens_prompt_sum",
+    "tokens_completion_sum",
+    "tokens_total_sum",
+    "stopped_early",
+    "budget_hit",
 )
 
 
@@ -134,6 +140,17 @@ class RunAggregation:
     run_json_paths: List[str] = field(default_factory=list)
     policy_ids: set[str] = field(default_factory=set)
     encountered_rows_file: bool = False
+    calls_attempted_count: int = 0
+    calls_made_count: int = 0
+    prompt_tokens_total: int = 0
+    completion_tokens_total: int = 0
+    usage_calls_attempted: Optional[int] = None
+    usage_calls_made: Optional[int] = None
+    usage_tokens_prompt_sum: Optional[int] = None
+    usage_tokens_completion_sum: Optional[int] = None
+    usage_tokens_total_sum: Optional[int] = None
+    budget_stopped_early: Optional[bool] = None
+    budget_hit_value: Optional[str] = None
 
     def update_from_rows(
         self,
@@ -150,6 +167,31 @@ class RunAggregation:
             policy = _stringify(run_meta.get("policy_id")).strip()
             if policy:
                 self.policy_ids.add(policy)
+            usage_meta = run_meta.get("usage")
+            if isinstance(usage_meta, dict):
+                calls_attempted = _parse_optional_int(usage_meta.get("calls_attempted"))
+                if calls_attempted is not None:
+                    self.usage_calls_attempted = calls_attempted
+                calls_made = _parse_optional_int(usage_meta.get("calls_made"))
+                if calls_made is not None:
+                    self.usage_calls_made = calls_made
+                prompt_sum = _parse_optional_int(usage_meta.get("tokens_prompt_sum"))
+                if prompt_sum is not None:
+                    self.usage_tokens_prompt_sum = prompt_sum
+                completion_sum = _parse_optional_int(usage_meta.get("tokens_completion_sum"))
+                if completion_sum is not None:
+                    self.usage_tokens_completion_sum = completion_sum
+                total_sum = _parse_optional_int(usage_meta.get("tokens_total_sum"))
+                if total_sum is not None:
+                    self.usage_tokens_total_sum = total_sum
+            budget_meta = run_meta.get("budget")
+            if isinstance(budget_meta, dict):
+                stopped_value = _parse_optional_bool(budget_meta.get("stopped_early"))
+                if stopped_value is not None:
+                    self.budget_stopped_early = stopped_value
+                hit_value = _stringify(budget_meta.get("budget_hit")).strip()
+                if hit_value:
+                    self.budget_hit_value = hit_value
         for entry in rows:
             self.total_trials += 1
             pre_decision, pre_reason, pre_policy = _normalise_gate(entry.get("pre_call_gate"))
@@ -158,22 +200,31 @@ class RunAggregation:
             _increment_gate(self.pre_counts, pre_decision)
             if pre_reason:
                 self.reason_counts[pre_reason] += 1
-            called = pre_decision != "deny"
-            if not called:
+            attempted = pre_decision != "deny"
+            fail_reason_value = _stringify(entry.get("fail_reason")).strip()
+            fail_reason_key = fail_reason_value.upper()
+            skipped_budget = fail_reason_key == "SKIPPED_BUDGET_REACHED"
+            is_dry_run = fail_reason_key == "DRY_RUN"
+            if not attempted:
                 self.pre_denied += 1
+            else:
+                self.calls_attempted_count += 1
+            called = attempted and not skipped_budget and not is_dry_run
             if called:
                 self.called_trials += 1
+                self.calls_made_count += 1
                 if bool(entry.get("success")):
                     self.passed_trials += 1
                 latency_value = _parse_optional_float(entry.get("latency_ms"))
                 if latency_value is not None:
                     self.latencies.append(latency_value)
+                prompt_tokens = _parse_optional_int(entry.get("prompt_tokens")) or 0
+                completion_tokens = _parse_optional_int(entry.get("completion_tokens")) or 0
+                self.prompt_tokens_total += int(prompt_tokens)
+                self.completion_tokens_total += int(completion_tokens)
                 total_tokens = _parse_optional_int(entry.get("total_tokens"))
-                if total_tokens is None:
-                    prompt_tokens = _parse_optional_int(entry.get("prompt_tokens")) or 0
-                    completion_tokens = _parse_optional_int(entry.get("completion_tokens")) or 0
-                    if prompt_tokens or completion_tokens:
-                        total_tokens = prompt_tokens + completion_tokens
+                if total_tokens is None and (prompt_tokens or completion_tokens):
+                    total_tokens = prompt_tokens + completion_tokens
                 if total_tokens is not None:
                     self.total_tokens += int(total_tokens)
                 cost_value = _parse_optional_float(entry.get("cost_usd"))
@@ -240,6 +291,23 @@ class RunAggregation:
 
     def csv_fields(self) -> Dict[str, str]:
         p50, p95 = self.latency_percentiles()
+        calls_made = self.usage_calls_made
+        if calls_made is None:
+            calls_made = self.calls_made_count
+        tokens_prompt_sum = self.usage_tokens_prompt_sum
+        if tokens_prompt_sum is None:
+            tokens_prompt_sum = self.prompt_tokens_total
+        tokens_completion_sum = self.usage_tokens_completion_sum
+        if tokens_completion_sum is None:
+            tokens_completion_sum = self.completion_tokens_total
+        tokens_total_sum = self.usage_tokens_total_sum
+        if tokens_total_sum is None:
+            tokens_total_sum = self.total_tokens
+        budget_hit = _stringify(self.budget_hit_value).strip() or "none"
+        stopped_value = self.budget_stopped_early
+        if stopped_value is None:
+            stopped_value = budget_hit.lower() != "none"
+        stopped_text = "true" if stopped_value else "false"
         return {
             "total_trials": str(self.total_trials),
             "pre_denied": str(self.pre_denied),
@@ -251,10 +319,35 @@ class RunAggregation:
             "post_warn": str(self.post_warn),
             "post_deny": str(self.post_deny),
             "top_reason": self.top_reason(),
+            "calls_made": str(calls_made),
+            "tokens_prompt_sum": str(tokens_prompt_sum),
+            "tokens_completion_sum": str(tokens_completion_sum),
+            "tokens_total_sum": str(tokens_total_sum),
+            "stopped_early": stopped_text,
+            "budget_hit": budget_hit,
         }
 
     def to_dict(self) -> Dict[str, Any]:
         p50, p95 = self.latency_percentiles()
+        calls_attempted = self.usage_calls_attempted
+        if calls_attempted is None:
+            calls_attempted = self.calls_attempted_count
+        calls_made = self.usage_calls_made
+        if calls_made is None:
+            calls_made = self.calls_made_count
+        tokens_prompt_sum = self.usage_tokens_prompt_sum
+        if tokens_prompt_sum is None:
+            tokens_prompt_sum = self.prompt_tokens_total
+        tokens_completion_sum = self.usage_tokens_completion_sum
+        if tokens_completion_sum is None:
+            tokens_completion_sum = self.completion_tokens_total
+        tokens_total_sum = self.usage_tokens_total_sum
+        if tokens_total_sum is None:
+            tokens_total_sum = self.total_tokens
+        budget_hit = _stringify(self.budget_hit_value).strip() or "none"
+        stopped_value = self.budget_stopped_early
+        if stopped_value is None:
+            stopped_value = budget_hit.lower() != "none"
         return {
             "total_trials": self.total_trials,
             "pre_denied": self.pre_denied,
@@ -285,6 +378,18 @@ class RunAggregation:
             "policy_ids": sorted(self.policy_ids),
             "encountered_rows_file": self.encountered_rows_file,
             "has_row_data": self.total_trials > 0,
+            "usage": {
+                "trials_total": self.total_trials,
+                "calls_attempted": calls_attempted,
+                "calls_made": calls_made,
+                "tokens_prompt_sum": tokens_prompt_sum,
+                "tokens_completion_sum": tokens_completion_sum,
+                "tokens_total_sum": tokens_total_sum,
+            },
+            "budget": {
+                "stopped_early": bool(stopped_value),
+                "budget_hit": budget_hit,
+            },
         }
 
 
@@ -356,6 +461,18 @@ def _parse_optional_float(value: Any) -> Optional[float]:
         return float(text)
     except (TypeError, ValueError):
         return None
+
+
+def _parse_optional_bool(value: Any) -> Optional[bool]:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in {"true", "1", "yes", "on"}:
+            return True
+        if text in {"false", "0", "no", "off"}:
+            return False
+    return None
 
 
 def read_real_rows(

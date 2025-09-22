@@ -96,6 +96,18 @@ def _default_report_payload() -> dict[str, object]:
         "policy_ids": [],
         "encountered_rows_file": False,
         "has_row_data": False,
+        "usage": {
+            "trials_total": 0,
+            "calls_attempted": 0,
+            "calls_made": 0,
+            "tokens_prompt_sum": 0,
+            "tokens_completion_sum": 0,
+            "tokens_total_sum": 0,
+        },
+        "budget": {
+            "stopped_early": False,
+            "budget_hit": "none",
+        },
     }
 
 
@@ -122,6 +134,18 @@ def _as_int(value: object, default: int = 0) -> int:
             return int(float(value))  # type: ignore[arg-type]
         except (TypeError, ValueError):
             return default
+
+
+def _as_bool(value: object, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in {"true", "1", "yes", "on"}:
+            return True
+        if text in {"false", "0", "no", "off"}:
+            return False
+    return default
 
 
 def _format_tokens(value: object) -> str:
@@ -162,7 +186,11 @@ def build_overview(report: dict[str, object]) -> str:
         display = pass_rate.get("display")
         if display:
             pass_rate_display = str(display)
-    tokens_display = _format_tokens(report.get("total_tokens"))
+    usage = report.get("usage") if isinstance(report.get("usage"), dict) else {}
+    budget = report.get("budget") if isinstance(report.get("budget"), dict) else {}
+    tokens_total_sum = _as_int(usage.get("tokens_total_sum") if isinstance(usage, dict) else 0,
+                               _as_int(report.get("total_tokens"), 0))
+    tokens_display = _format_tokens(tokens_total_sum)
     latency_display = _format_latency(report)
     cost_display = _format_cost(report)
     gates = report.get("gates")
@@ -179,6 +207,18 @@ def build_overview(report: dict[str, object]) -> str:
     post_warn = _as_int(report.get("post_warn"), 0)
     post_deny = _as_int(report.get("post_deny"), 0)
     top_reason = str(report.get("top_reason") or "-")
+    calls_made = _as_int(usage.get("calls_made") if isinstance(usage, dict) else 0, called)
+    budget_hit = str((budget.get("budget_hit") if isinstance(budget, dict) else "") or "none")
+    stopped_early = _as_bool(budget.get("stopped_early") if isinstance(budget, dict) else None, budget_hit.lower() != "none")
+    budget_line = (
+        "<div class='overview-budget'>Budget: calls {calls} | tokens {tokens} | "
+        "stopped_early {stopped} | hit {hit}</div>"
+    ).format(
+        calls=calls_made,
+        tokens=html.escape(tokens_display),
+        stopped=str(stopped_early).lower(),
+        hit=html.escape(budget_hit),
+    )
     return f"""
 <div class='overview-grid'>
   <div class='overview-card overview-pass'>
@@ -212,7 +252,17 @@ def build_overview(report: dict[str, object]) -> str:
     <div class='value'>{html.escape(top_reason)}</div>
   </div>
 </div>
+{budget_line}
 """
+
+
+def build_overview_badge(report: dict[str, object]) -> str:
+    budget = report.get("budget") if isinstance(report.get("budget"), dict) else {}
+    hit = str((budget.get("budget_hit") if isinstance(budget, dict) else "") or "none")
+    stopped = _as_bool(budget.get("stopped_early") if isinstance(budget, dict) else None, hit.lower() != "none")
+    if not stopped:
+        return ""
+    return f"<span class='badge badge-warn'>Stopped early: {html.escape(hit)}</span>"
 
 
 def _clean_status_message(kind: str, message: str) -> str:
@@ -348,11 +398,16 @@ def render_template(context: dict[str, str]) -> str:
       .banner-error{background:#fee2e2;color:#b91c1c;}
       .banner-warn{background:#fef3c7;color:#92400e;}
       .overview-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;}
+      .overview-header{display:flex;align-items:center;gap:10px;margin-bottom:8px;}
+      .overview-header h2{margin:0;}
       .overview-card{background:#ffffff;padding:12px 16px;border-radius:8px;box-shadow:0 1px 2px rgba(15,23,42,0.08);}
       .overview-pass{background:#1e293b;color:#f8fafc;}
       .overview-card .label{font-size:12px;text-transform:uppercase;letter-spacing:0.06em;color:inherit;opacity:0.7;}
       .overview-card .value{font-size:20px;font-weight:600;margin-top:4px;}
       .overview-card .sub{font-size:13px;margin-top:2px;opacity:0.8;}
+      .badge{display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;font-size:12px;font-weight:600;}
+      .badge-warn{background:#fef3c7;color:#92400e;}
+      .overview-budget{margin-top:10px;font-size:14px;color:#52606d;}
       table{border-collapse:collapse;width:100%;max-width:980px;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 2px rgba(15,23,42,0.08);}
       th,td{border:1px solid #e5e7eb;padding:8px 10px;font-size:14px;text-align:left;}
       th{background:#f3f4f6;font-weight:600;}
@@ -367,6 +422,10 @@ def render_template(context: dict[str, str]) -> str:
     <h1>$HEADER_TITLE</h1>
     $META
     $BANNERS
+    <div class='overview-header'>
+      <h2>Overview</h2>
+      $OVERVIEW_BADGE
+    </div>
     $OVERVIEW
     <h2>Summary chart</h2>
     $SUMMARY_CHART
@@ -419,6 +478,7 @@ def write_report(run_dir: Path) -> None:
         "HEADER_TITLE": "DoomArena-Lab Run Report",
         "META": meta_html,
         "BANNERS": build_banners(report, policy_ids),
+        "OVERVIEW_BADGE": build_overview_badge(report),
         "OVERVIEW": build_overview(report),
         "SUMMARY_CHART": svg_tag,
         "SUMMARY_TABLE": table_html,
