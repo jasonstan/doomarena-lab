@@ -1,3 +1,4 @@
+exp: airline_escalating_v1
 seed: 42
 trials: 20
 online: false

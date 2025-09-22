@@ -3,8 +3,10 @@ from __future__ import annotations
 import csv
 import json
 import argparse
+import math
 import sys
-from dataclasses import dataclass
+from collections import Counter
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -29,6 +31,16 @@ SUMMARY_COLUMNS: Tuple[str, ...] = (
     "sum_cost_usd",
     "git_commit",
     "run_at",
+    "total_trials",
+    "pre_denied",
+    "called_trials",
+    "pass_rate",
+    "p50_ms",
+    "p95_ms",
+    "total_tokens",
+    "post_warn",
+    "post_deny",
+    "top_reason",
 )
 
 
@@ -48,6 +60,231 @@ class ExperimentSummary:
     @property
     def asr_percent(self) -> float:
         return self.asr * 100.0
+
+
+def _relative_path(path: Path, base: Path) -> str:
+    try:
+        return path.relative_to(base).as_posix()
+    except ValueError:
+        return path.name
+
+
+def _normalise_gate(decision: Any) -> tuple[str, Optional[str], Optional[str]]:
+    if not isinstance(decision, dict):
+        return "allow", None, None
+    value = _stringify(decision.get("decision")).strip().lower()
+    if value not in {"allow", "warn", "deny"}:
+        value = "allow"
+    reason_code = _stringify(decision.get("reason_code")).strip()
+    if not reason_code:
+        reason_code_opt: Optional[str] = None
+    else:
+        reason_code_opt = reason_code
+    policy_id = _stringify(decision.get("policy_id")).strip()
+    if not policy_id:
+        policy_id_opt: Optional[str] = None
+    else:
+        policy_id_opt = policy_id
+    return value, reason_code_opt, policy_id_opt
+
+
+def _increment_gate(counts: Dict[str, int], decision: str) -> None:
+    key = decision if decision in {"allow", "warn", "deny"} else "allow"
+    counts[key] = int(counts.get(key, 0)) + 1
+
+
+def _percentile(values: List[float], percentile: float) -> Optional[float]:
+    if not values:
+        return None
+    ordered = sorted(values)
+    if len(ordered) == 1:
+        return ordered[0]
+    rank = percentile * float(len(ordered) - 1)
+    lower = int(math.floor(rank))
+    upper = int(math.ceil(rank))
+    if lower == upper:
+        return ordered[lower]
+    lower_value = ordered[lower]
+    upper_value = ordered[upper]
+    return lower_value + (upper_value - lower_value) * (rank - lower)
+
+
+@dataclass
+class RunAggregation:
+    base_dir: Path
+    total_trials: int = 0
+    pre_denied: int = 0
+    called_trials: int = 0
+    passed_trials: int = 0
+    post_warn: int = 0
+    post_deny: int = 0
+    total_tokens: int = 0
+    estimated_cost: float = 0.0
+    cost_present: bool = False
+    latencies: List[float] = field(default_factory=list)
+    pre_counts: Dict[str, int] = field(
+        default_factory=lambda: {"allow": 0, "warn": 0, "deny": 0}
+    )
+    post_counts: Dict[str, int] = field(
+        default_factory=lambda: {"allow": 0, "warn": 0, "deny": 0}
+    )
+    reason_counts: Counter[str] = field(default_factory=Counter)
+    rows_paths: List[str] = field(default_factory=list)
+    run_json_paths: List[str] = field(default_factory=list)
+    policy_ids: set[str] = field(default_factory=set)
+    encountered_rows_file: bool = False
+
+    def update_from_rows(
+        self,
+        *,
+        path: Path,
+        rows: Iterable[Dict[str, Any]],
+        run_meta: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        self.encountered_rows_file = True
+        rel = _relative_path(path, self.base_dir)
+        if rel not in self.rows_paths:
+            self.rows_paths.append(rel)
+        if run_meta:
+            policy = _stringify(run_meta.get("policy_id")).strip()
+            if policy:
+                self.policy_ids.add(policy)
+        for entry in rows:
+            self.total_trials += 1
+            pre_decision, pre_reason, pre_policy = _normalise_gate(entry.get("pre_call_gate"))
+            if pre_policy:
+                self.policy_ids.add(pre_policy)
+            _increment_gate(self.pre_counts, pre_decision)
+            if pre_reason:
+                self.reason_counts[pre_reason] += 1
+            called = pre_decision != "deny"
+            if not called:
+                self.pre_denied += 1
+            if called:
+                self.called_trials += 1
+                if bool(entry.get("success")):
+                    self.passed_trials += 1
+                latency_value = _parse_optional_float(entry.get("latency_ms"))
+                if latency_value is not None:
+                    self.latencies.append(latency_value)
+                total_tokens = _parse_optional_int(entry.get("total_tokens"))
+                if total_tokens is None:
+                    prompt_tokens = _parse_optional_int(entry.get("prompt_tokens")) or 0
+                    completion_tokens = _parse_optional_int(entry.get("completion_tokens")) or 0
+                    if prompt_tokens or completion_tokens:
+                        total_tokens = prompt_tokens + completion_tokens
+                if total_tokens is not None:
+                    self.total_tokens += int(total_tokens)
+                cost_value = _parse_optional_float(entry.get("cost_usd"))
+                if cost_value is not None:
+                    self.estimated_cost += float(cost_value)
+                    self.cost_present = True
+                post_decision, post_reason, post_policy = _normalise_gate(
+                    entry.get("post_call_gate")
+                )
+                if post_policy:
+                    self.policy_ids.add(post_policy)
+                _increment_gate(self.post_counts, post_decision)
+                if post_reason:
+                    self.reason_counts[post_reason] += 1
+                if post_decision == "warn":
+                    self.post_warn += 1
+                elif post_decision == "deny":
+                    self.post_deny += 1
+            else:
+                post_decision, post_reason, post_policy = _normalise_gate(
+                    entry.get("post_call_gate")
+                )
+                if post_policy:
+                    self.policy_ids.add(post_policy)
+                if post_reason:
+                    self.reason_counts[post_reason] += 1
+
+    def register_run_json_path(self, path: Path) -> None:
+        if not path.exists():
+            return
+        rel = _relative_path(path, self.base_dir)
+        if rel not in self.run_json_paths:
+            self.run_json_paths.append(rel)
+
+    def latency_percentiles(self) -> tuple[Optional[int], Optional[int]]:
+        if not self.latencies:
+            return None, None
+        p50 = _percentile(self.latencies, 0.5)
+        p95 = _percentile(self.latencies, 0.95)
+        return (
+            int(round(p50)) if p50 is not None else None,
+            int(round(p95)) if p95 is not None else None,
+        )
+
+    def pass_rate_percent(self) -> float:
+        denominator = max(self.called_trials, 1)
+        return (self.passed_trials / float(denominator)) * 100.0
+
+    def pass_rate_display(self) -> str:
+        return f"{self.pass_rate_percent():.1f}%"
+
+    def top_reason(self) -> str:
+        if not self.reason_counts:
+            return "-"
+        max_count = max(self.reason_counts.values())
+        candidates = [
+            reason
+            for reason, count in self.reason_counts.items()
+            if count == max_count
+        ]
+        if not candidates:
+            return "-"
+        return sorted(candidates)[0]
+
+    def csv_fields(self) -> Dict[str, str]:
+        p50, p95 = self.latency_percentiles()
+        return {
+            "total_trials": str(self.total_trials),
+            "pre_denied": str(self.pre_denied),
+            "called_trials": str(self.called_trials),
+            "pass_rate": self.pass_rate_display(),
+            "p50_ms": str(p50) if p50 is not None else "",
+            "p95_ms": str(p95) if p95 is not None else "",
+            "total_tokens": str(self.total_tokens),
+            "post_warn": str(self.post_warn),
+            "post_deny": str(self.post_deny),
+            "top_reason": self.top_reason(),
+        }
+
+    def to_dict(self) -> Dict[str, Any]:
+        p50, p95 = self.latency_percentiles()
+        return {
+            "total_trials": self.total_trials,
+            "pre_denied": self.pre_denied,
+            "called_trials": self.called_trials,
+            "passed_trials": self.passed_trials,
+            "pass_rate": {
+                "percent": self.pass_rate_percent(),
+                "display": self.pass_rate_display(),
+            },
+            "latency_ms": {"p50": p50, "p95": p95},
+            "total_tokens": self.total_tokens,
+            "estimated_cost_usd": round(self.estimated_cost, 4)
+            if self.cost_present
+            else 0.0,
+            "cost_present": self.cost_present,
+            "post_warn": self.post_warn,
+            "post_deny": self.post_deny,
+            "gates": {
+                "pre": {key: int(self.pre_counts.get(key, 0)) for key in ("allow", "warn", "deny")},
+                "post": {key: int(self.post_counts.get(key, 0)) for key in ("allow", "warn", "deny")},
+            },
+            "top_reason": self.top_reason(),
+            "reason_counts": {
+                reason: int(count) for reason, count in self.reason_counts.items()
+            },
+            "rows_paths": list(self.rows_paths),
+            "run_json_paths": list(self.run_json_paths),
+            "policy_ids": sorted(self.policy_ids),
+            "encountered_rows_file": self.encountered_rows_file,
+            "has_row_data": self.total_trials > 0,
+        }
 
 
 def read_jsonl(path: Path) -> Tuple[Dict[str, Any], Dict[str, Any]]:
@@ -120,7 +357,9 @@ def _parse_optional_float(value: Any) -> Optional[float]:
         return None
 
 
-def read_real_rows(path: Path) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+def read_real_rows(
+    path: Path,
+) -> Tuple[Dict[str, Any], Dict[str, Any], List[Dict[str, Any]], Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
     with path.open("r", encoding="utf-8") as handle:
         for line in handle:
@@ -133,9 +372,6 @@ def read_real_rows(path: Path) -> Tuple[Dict[str, Any], Dict[str, Any]]:
                 continue
             if isinstance(payload, dict):
                 rows.append(payload)
-
-    if not rows:
-        raise RuntimeError(f"No rows found in {path}")
 
     run_dir = path.parent
     run_meta_path = run_dir / "run.json"
@@ -150,7 +386,11 @@ def read_real_rows(path: Path) -> Tuple[Dict[str, Any], Dict[str, Any]]:
             run_meta = meta_payload
 
     run_id = _stringify(run_meta.get("run_id")) or run_dir.parent.name
-    exp_name = _stringify(run_meta.get("exp")) or _stringify(rows[0].get("exp")) or run_dir.name
+    exp_name = _stringify(run_meta.get("exp"))
+    if not exp_name and rows:
+        exp_name = _stringify(rows[0].get("exp"))
+    if not exp_name:
+        exp_name = run_dir.name
     model = _stringify(run_meta.get("model"))
     if not model:
         for row in rows:
@@ -242,7 +482,7 @@ def read_real_rows(path: Path) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         "mode": header["mode"],
     }
 
-    return header, summary
+    return header, summary, rows, run_meta
 
 
 def _collect_seeds(header: Dict[str, Any]) -> str:
@@ -790,6 +1030,14 @@ def write_run_notes(base_dir: Path, rows: List[Dict[str, str]]) -> None:
     notes_path.write_text("\n".join(lines), encoding="utf-8")
 
 
+def write_run_report(base_dir: Path, aggregation: RunAggregation) -> None:
+    payload = aggregation.to_dict()
+    payload["generated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    report_path = base_dir / "run_report.json"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Aggregate DoomArena run outputs")
     parser.add_argument(
@@ -826,10 +1074,14 @@ def main() -> None:
             print(empty_reason)
 
     new_rows: List[Dict[str, str]] = []
+    run_metrics = RunAggregation(base_dir=base_dir)
+
     for path in jsonl_files:
         try:
             if path.name == "rows.jsonl":
-                header, summary = read_real_rows(path)
+                header, summary, trial_rows, run_meta = read_real_rows(path)
+                run_metrics.update_from_rows(path=path, rows=trial_rows, run_meta=run_meta)
+                run_metrics.register_run_json_path(path.parent / "run.json")
             else:
                 header, summary = read_jsonl(path)
         except RuntimeError as exc:
@@ -842,12 +1094,21 @@ def main() -> None:
             continue
         new_rows.append(row)
 
+    run_metrics.register_run_json_path(base_dir / "run.json")
+
     existing_rows = read_existing(summary_path)
     combined_rows = merge_rows(existing_rows, new_rows)
+
+    metric_columns = run_metrics.csv_fields()
+    if metric_columns:
+        for row in combined_rows:
+            for key, value in metric_columns.items():
+                row[key] = value
 
     write_summary(summary_path, combined_rows)
     write_summary_md(base_dir, combined_rows)
     write_run_notes(base_dir, combined_rows)
+    write_run_report(base_dir, run_metrics)
 
     if not combined_rows:
         if empty_reason is None:

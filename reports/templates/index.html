@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>$TITLE</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+      }
+      body {
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        margin: 24px;
+        background: #f9fafb;
+        color: #1f2933;
+      }
+      h1 {
+        margin: 0 0 12px;
+        font-size: 28px;
+        font-weight: 650;
+      }
+      h2 {
+        margin: 32px 0 12px;
+        font-size: 20px;
+        font-weight: 600;
+      }
+      section {
+        margin-bottom: 32px;
+      }
+      .page-header {
+        margin-bottom: 12px;
+      }
+      .meta {
+        color: #52606d;
+        font-size: 13px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .meta div {
+        background: #e4e7eb;
+        color: #364152;
+        padding: 4px 8px;
+        border-radius: 6px;
+      }
+      .banner {
+        padding: 14px 18px;
+        border-radius: 8px;
+        margin: 18px 0;
+        font-size: 14px;
+        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.12);
+      }
+      .banner-error {
+        background: #fee2e2;
+        color: #b91c1c;
+      }
+      .banner-warn {
+        background: #fef3c7;
+        color: #92400e;
+      }
+      .overview-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 14px;
+      }
+      .overview-card {
+        background: #ffffff;
+        padding: 16px;
+        border-radius: 10px;
+        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.12);
+      }
+      .overview-pass {
+        background: linear-gradient(135deg, #1e293b, #0f172a);
+        color: #f8fafc;
+      }
+      .overview-card .label {
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        opacity: 0.7;
+      }
+      .overview-card .value {
+        font-size: 22px;
+        font-weight: 600;
+        margin-top: 6px;
+      }
+      .overview-card .sub {
+        font-size: 13px;
+        margin-top: 4px;
+        opacity: 0.85;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        max-width: 980px;
+        background: #ffffff;
+        border-radius: 10px;
+        overflow: hidden;
+        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+      }
+      th, td {
+        border: 1px solid #e5e7eb;
+        padding: 8px 10px;
+        font-size: 14px;
+        text-align: left;
+      }
+      th {
+        background: #f3f4f6;
+        font-weight: 600;
+      }
+      .reason-table {
+        max-width: 360px;
+      }
+      .artifact-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+      }
+      .artifact-list li {
+        margin: 6px 0;
+        font-size: 14px;
+      }
+      .artifact-list strong {
+        margin-right: 6px;
+      }
+      .missing {
+        color: #9ca3af;
+      }
+      a {
+        color: #2563eb;
+        text-decoration: none;
+      }
+      a:hover {
+        text-decoration: underline;
+      }
+      @media (prefers-color-scheme: dark) {
+        body {
+          background: #111827;
+          color: #f3f4f6;
+        }
+        .meta div {
+          background: rgba(148, 163, 184, 0.2);
+          color: #e2e8f0;
+        }
+        .overview-card {
+          background: #1f2937;
+          box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+        }
+        table {
+          background: #1f2937;
+          box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+        }
+        th {
+          background: #27303f;
+        }
+        td, th {
+          border-color: #374151;
+        }
+        .artifact-list .missing {
+          color: #94a3b8;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="page-header">
+      <h1>$HEADER_TITLE</h1>
+      $META
+    </header>
+    $BANNERS
+    <section>
+      <h2>Overview</h2>
+      $OVERVIEW
+    </section>
+    <section>
+      <h2>Summary chart</h2>
+      $SUMMARY_CHART
+    </section>
+    <section>
+      <h2>Summary table</h2>
+      $SUMMARY_TABLE
+    </section>
+    <section>
+      <h2>Top gate reasons</h2>
+      $TOP_REASONS
+    </section>
+    <section>
+      <h2>Artifacts</h2>
+      $ARTIFACT_LINKS
+    </section>
+  </body>
+</html>

@@ -183,18 +183,19 @@ report: aggregate plot notes latest ## Publish artifacts to results/ and refresh
 	cp -f "$(RUN_DIR)/summary.md" $(RESULTS_DIR)/summary.md
 	cp -f "$(RUN_DIR)/notes.md" $(RESULTS_DIR)/notes.md 2>/dev/null || true
 	cp -f "$(RUN_DIR)/run.json" $(RESULTS_DIR)/run.json 2>/dev/null || true
+	cp -f "$(RUN_DIR)/run_report.json" $(RESULTS_DIR)/run_report.json 2>/dev/null || true
 	# Generate per-run HTML report + mirror to LATEST
 	python tools/mk_report.py "$(RUN_DIR)"
 	if [ -e "$(RESULTS_DIR)/LATEST" ] || [ -L "$(RESULTS_DIR)/LATEST" ] || [ -f "$(RESULTS_DIR)/LATEST.path" ]; then \
-		python tools/mk_report.py "$(RESULTS_DIR)/LATEST"; \
+	python tools/mk_report.py "$(RESULTS_DIR)/LATEST"; \
 	fi
 	rm -f $(RUN_CURRENT)
 	if [ -x "$(PY)" ]; then \
-		"$(PY)" scripts/update_readme_results.py; \
-		"$(PY)" scripts/update_readme_topn.py; \
+	"$(PY)" scripts/update_readme_results.py; \
+	"$(PY)" scripts/update_readme_topn.py; \
 	else \
-		python scripts/update_readme_results.py; \
-		python scripts/update_readme_topn.py; \
+	python scripts/update_readme_results.py; \
+	python scripts/update_readme_topn.py; \
 	fi
 
 real1:
