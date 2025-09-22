@@ -113,6 +113,7 @@ jobs:
       - name: Run REAL τ slice (dry-run on PR)
         if: github.event_name == 'pull_request'
         env:
+          GROQ_API_KEY: dry-run-placeholder
           RUN_ID: ${{ env.RUN_ID }}
         run: |
           set -euo pipefail
