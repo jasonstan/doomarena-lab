@@ -3,3 +3,4 @@ pytest
 pyyaml
 pandas
 matplotlib
+requests>=2.31,<3.0

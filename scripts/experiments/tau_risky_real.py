@@ -236,8 +236,11 @@ def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run REAL τ-Bench-style risky slice")
     parser.add_argument("--model", default=os.environ.get("MODEL", "llama-3.1-8b-instant"))
     parser.add_argument("--trials", type=int, default=6)
-    parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--results_dir", default="results")
+    parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument("--seeds", type=int, default=None)
+    parser.add_argument("--results_dir", default=None)
+    parser.add_argument("--outdir", default=None)
+    parser.add_argument("--risk", default=None)
     parser.add_argument("--exp", default="tau_risky_real")
     parser.add_argument("--max-trials", type=int, default=_env_int("MAX_TRIALS"))
     parser.add_argument("--max-calls", type=int, default=_env_int("MAX_CALLS"))
@@ -256,7 +259,25 @@ def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
     parser.add_argument("--temperature", type=float, default=_env_float("TEMPERATURE", 0.2))
     parser.add_argument("--dry-run", action="store_true", default=_env_flag("DRY_RUN"))
     parser.add_argument("--fail-on-budget", action="store_true", default=_env_flag("FAIL_ON_BUDGET"))
-    return parser.parse_args(list(argv) if argv is not None else None)
+    args = parser.parse_args(list(argv) if argv is not None else None)
+
+    if args.seed is not None and args.seeds is not None:
+        print("note: both seeds provided; using --seed.")
+    if args.seed is None:
+        if args.seeds is not None:
+            args.seed = args.seeds
+        else:
+            args.seed = 42
+
+    results_dir = args.results_dir if args.results_dir is not None else "results"
+    if args.outdir is not None:
+        results_dir = args.outdir
+    args.results_dir = results_dir
+
+    if args.risk is not None:
+        print("note: --risk is ignored in tau_risky_real; keeping for compatibility.")
+
+    return args
 
 
 def _decision_to_row(decision: Optional[GateDecision]) -> Optional[Dict[str, Any]]:
@@ -317,6 +338,10 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
 
     run_id = mk_run_id()
     out_dir = ensure_run_dir(args.results_dir, run_id, args.exp)
+    results_root = Path(args.results_dir)
+    results_root.mkdir(parents=True, exist_ok=True)
+    run_marker_path = results_root / ".run_id"
+    run_marker_path.write_text(f"{run_id}\n", encoding="utf-8")
     rows_path = out_dir / "rows.jsonl"
     run_meta_path = out_dir / "run.json"
     policy_id = get_policy_id()
