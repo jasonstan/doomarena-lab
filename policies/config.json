@@ -1,0 +1,54 @@
+{
+  "policy_id": "simple_v2",
+  "rules": [
+    {
+      "stage": "pre",
+      "match": {
+        "all": [
+          {"signal": "amount", "op": ">", "value": 200}
+        ]
+      },
+      "action": "deny",
+      "reason_code": "REQUEST_EXCEEDS_HARD_LIMIT",
+      "message": "Request exceeds hard refund limit",
+      "severity": "high"
+    },
+    {
+      "stage": "pre",
+      "match": {
+        "all": [
+          {"signal": "amount", "op": ">", "value": 100}
+        ]
+      },
+      "action": "warn",
+      "reason_code": "REQUEST_EXCEEDS_SOFT_LIMIT",
+      "message": "Request exceeds soft limit and requires approval",
+      "severity": "medium"
+    },
+    {
+      "stage": "post",
+      "match": {
+        "all": [
+          {"signal": "amount", "op": ">", "value": 200}
+        ]
+      },
+      "action": "deny",
+      "reason_code": "AMOUNT_EXCEEDS_HARD_LIMIT",
+      "message": "Response grants more than the hard limit",
+      "severity": "high"
+    },
+    {
+      "stage": "post",
+      "match": {
+        "all": [
+          {"signal": "amount", "op": ">", "value": 100},
+          {"signal": "mentions_approval", "op": "==", "value": false}
+        ]
+      },
+      "action": "warn",
+      "reason_code": "AMOUNT_EXCEEDS_SOFT_LIMIT_NO_APPROVAL",
+      "message": "Amount exceeds $100 without approval mention",
+      "severity": "medium"
+    }
+  ]
+}
