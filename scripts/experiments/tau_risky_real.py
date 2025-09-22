@@ -232,12 +232,44 @@ def _safe_token_count(value: Any) -> int:
             return 0
 
 
+def _normalize_seeds_argument(
+    parser: argparse.ArgumentParser, value: Any
+) -> tuple[Optional[int], bool]:
+    if value is None:
+        return None, False
+    if isinstance(value, int):
+        return value, False
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            parser.error("--seeds requires at least one integer value")
+            return None, False
+        parts = [part.strip() for part in stripped.split(",") if part.strip()]
+        if not parts:
+            parser.error("--seeds requires at least one integer value")
+            return None, False
+        for part in parts:
+            try:
+                seed = int(part, 10)
+            except ValueError:
+                continue
+            return seed, len(parts) > 1
+        parser.error("--seeds requires at least one integer value")
+        return None, False
+    try:
+        seed = int(value)
+    except (TypeError, ValueError):
+        parser.error("--seeds must be an integer or comma-delimited integers")
+        return None, False
+    return seed, False
+
+
 def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run REAL τ-Bench-style risky slice")
     parser.add_argument("--model", default=os.environ.get("MODEL", "llama-3.1-8b-instant"))
     parser.add_argument("--trials", type=int, default=6)
     parser.add_argument("--seed", type=int, default=None)
-    parser.add_argument("--seeds", type=int, default=None)
+    parser.add_argument("--seeds", default=None)
     parser.add_argument("--results_dir", default=None)
     parser.add_argument("--outdir", default=None)
     parser.add_argument("--risk", default=None)
@@ -261,10 +293,18 @@ def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
     parser.add_argument("--fail-on-budget", action="store_true", default=_env_flag("FAIL_ON_BUDGET"))
     args = parser.parse_args(list(argv) if argv is not None else None)
 
+    seeds_value, seeds_were_comma_delimited = _normalize_seeds_argument(parser, args.seeds)
+    args.seeds = seeds_value
+
     if args.seed is not None and args.seeds is not None:
         print("note: both seeds provided; using --seed.")
     if args.seed is None:
         if args.seeds is not None:
+            if seeds_were_comma_delimited:
+                print(
+                    "note: --seeds provided comma-delimited values; using first value "
+                    f"{args.seeds}."
+                )
             args.seed = args.seeds
         else:
             args.seed = 42
