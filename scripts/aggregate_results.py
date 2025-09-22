@@ -120,6 +120,131 @@ def _parse_optional_float(value: Any) -> Optional[float]:
         return None
 
 
+def read_real_rows(path: Path) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    with path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, dict):
+                rows.append(payload)
+
+    if not rows:
+        raise RuntimeError(f"No rows found in {path}")
+
+    run_dir = path.parent
+    run_meta_path = run_dir / "run.json"
+    run_meta: Dict[str, Any] = {}
+    if run_meta_path.exists():
+        try:
+            with run_meta_path.open("r", encoding="utf-8") as handle:
+                meta_payload = json.load(handle)
+        except (OSError, json.JSONDecodeError):
+            meta_payload = None
+        if isinstance(meta_payload, dict):
+            run_meta = meta_payload
+
+    run_id = _stringify(run_meta.get("run_id")) or run_dir.parent.name
+    exp_name = _stringify(run_meta.get("exp")) or _stringify(rows[0].get("exp")) or run_dir.name
+    model = _stringify(run_meta.get("model"))
+    if not model:
+        for row in rows:
+            model = _stringify(row.get("model"))
+            if model:
+                break
+
+    seeds_seen: set[str] = set()
+    seeds_ordered: List[str] = []
+
+    def _add_seed(value: Any) -> None:
+        text = _stringify(value).strip()
+        if not text or text in seeds_seen:
+            return
+        seeds_seen.add(text)
+        seeds_ordered.append(text)
+
+    _add_seed(run_meta.get("seed"))
+    seeds_value = run_meta.get("seeds")
+    if isinstance(seeds_value, (list, tuple)):
+        for item in seeds_value:
+            _add_seed(item)
+    elif seeds_value is not None:
+        _add_seed(seeds_value)
+
+    for row in rows:
+        _add_seed(row.get("seed"))
+
+    trials = len(rows)
+    successes = sum(1 for row in rows if bool(row.get("success")))
+
+    total_tokens = 0
+    latency_values: List[float] = []
+    cost_total = 0.0
+    cost_present = False
+
+    for row in rows:
+        total_opt = _parse_optional_int(row.get("total_tokens"))
+        if total_opt is None:
+            prompt_opt = _parse_optional_int(row.get("prompt_tokens")) or 0
+            completion_opt = _parse_optional_int(row.get("completion_tokens")) or 0
+            if prompt_opt or completion_opt:
+                total_opt = prompt_opt + completion_opt
+        if total_opt is not None:
+            total_tokens += int(total_opt)
+
+        latency_opt = _parse_optional_float(row.get("latency_ms"))
+        if latency_opt is not None:
+            latency_values.append(latency_opt)
+
+        cost_opt = _parse_optional_float(row.get("cost_usd"))
+        if cost_opt is not None:
+            cost_total += cost_opt
+            cost_present = True
+
+    avg_latency: Optional[float] = None
+    if latency_values:
+        avg_latency = sum(latency_values) / float(len(latency_values))
+
+    run_at = _stringify(run_meta.get("started"))
+    if not run_at:
+        for row in rows:
+            run_at = _stringify(row.get("timestamp"))
+            if run_at:
+                break
+
+    header: Dict[str, Any] = {
+        "event": "header",
+        "exp": exp_name,
+        "exp_id": f"{exp_name}:{run_id}" if run_id else exp_name,
+        "config": _stringify(run_meta.get("config")),
+        "cfg_hash": _stringify(run_meta.get("cfg_hash")),
+        "mode": _stringify(run_meta.get("mode")) or "REAL",
+        "seed": seeds_ordered[0] if seeds_ordered else None,
+        "seeds": seeds_ordered or None,
+        "model": model,
+        "run_at": run_at,
+        "git_commit": _stringify(run_meta.get("git_commit")),
+    }
+
+    summary: Dict[str, Any] = {
+        "event": "summary",
+        "trials": trials,
+        "successes": successes,
+        "asr": (successes / trials) if trials else 0.0,
+        "sum_tokens": total_tokens,
+        "avg_latency_ms": avg_latency,
+        "sum_cost_usd": cost_total if cost_present else None,
+        "mode": header["mode"],
+    }
+
+    return header, summary
+
+
 def _collect_seeds(header: Dict[str, Any]) -> str:
     seen: set[str] = set()
     ordered: List[str] = []
@@ -702,12 +827,11 @@ def main() -> None:
 
     new_rows: List[Dict[str, str]] = []
     for path in jsonl_files:
-        header, summary = read_jsonl(path)
-        ...
-    new_rows: List[Dict[str, str]] = []
-    for path in jsonl_files:
         try:
-            header, summary = read_jsonl(path)
+            if path.name == "rows.jsonl":
+                header, summary = read_real_rows(path)
+            else:
+                header, summary = read_jsonl(path)
         except RuntimeError as exc:
             print(f"Skipping {path}: {exc}")
             continue
