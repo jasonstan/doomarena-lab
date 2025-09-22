@@ -3,3 +3,4 @@ doomarena-taubench
 pytest
 pyyaml
 matplotlib
+pandas

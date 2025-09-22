@@ -30,6 +30,12 @@ EXPECTED_COLUMNS = [
     "post_warn",
     "post_deny",
     "top_reason",
+    "calls_made",
+    "tokens_prompt_sum",
+    "tokens_completion_sum",
+    "tokens_total_sum",
+    "stopped_early",
+    "budget_hit",
     "schema",
 ]
 
