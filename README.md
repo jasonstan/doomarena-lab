@@ -1,6 +1,35 @@
 # DoomArena-Lab
 
-_DoomArena-Lab is a small, e2e-oriented companion to ServiceNow/DoomArena. It helps teams build **tiny, repeatable demos and grounded tests** with **SHIM** sims today and a clear path to **REAL** adapters (first MVP: one cloud model)._
+## DoomArena-Lab — what it is and why it exists
+
+**DoomArena-Lab** is a lightweight playground for **grounded agent security & safety experiments**. It helps small teams move fast from *prompts* to *plans* to *evidence*: run tiny, repeatable SHIM demos today, then flip on REAL adapters to cloud models as they become available—all with CI-friendly artifacts you can review in a PR.
+
+### The problem we’re solving
+- Most agent testing is **generic and one-shot**. Real agents are loops (Goal → Plan → Tools → Env → Memory → Feedback) and their risks show up **between** the boxes.
+- Teams need **cheap, deterministic, and explainable** experiments they can run in CI—*before* they commit to heavy frameworks or expensive eval suites.
+- Security reviewers want **governance signals** (allow/warn/deny decisions, reasons, audit) next to success/ASR metrics—not a blank HTML page.
+
+### Who this is for
+- **Applied AI teams** shipping agentic features who need a **first, credible MVP** of safety & security testing with artifacts leadership can read.
+- **Security/Trust reviewers** who need a **gate-aware** view of runs (what was blocked, why) and a low-friction way to comment in PRs.
+- **Researchers** who want a minimal harness to try risky slices without adopting a large platform on day one.
+
+### How this differs from the upstream **DoomArena** repo
+- **Scope:** Upstream is a full evaluation framework. **DoomArena-Lab** is a **small companion**: opinionated scripts, fixtures, and CI layouts for a *lean* end-to-end.
+- **Velocity over breadth:** We prioritize **one real slice** working cleanly (rows → CSV/SVG/HTML + governance) over many benchmarks.
+- **Governance-first ergonomics:** Built-in policy gates (allow/warn/deny), audit trails, and gate-aware reports—so results are **interpretable**.
+- **Cost discipline:** Defaults to **low-cost models** and small trials; artifacts make token/cost visible.
+
+### Where we are today (MVP status)
+- **REAL risky slice** writes per-trial JSONL rows and run audit.
+- **Aggregator** emits `summary.csv`, `summary.svg`, and `index.html`.
+- **Basic governance hooks**: pre/post gates logged per trial (tightening in progress).
+
+### Where we’re going (next few weeks)
+- **Gate tightening & policy config** (structured decisions, reasons, CI “GATES” summary).
+- **Gate-aware reports** (clear banners for all-pre-denied/no-data, top reasons, pass-rate over callable trials).
+- **CI guardrails** (human-readable failure/warn messages) and simple **cost/volume controls**.
+- Optional: **provider matrix** (Groq/OpenAI/Local) and **τ-Bench interop** for offline comparisons.
 
 ## What’s new (MVP progress)
 - **REAL risky slice now writes rows** → `results/<RUN_ID>/tau_risky_real/rows.jsonl` + `run.json`
@@ -28,62 +57,43 @@ results/<RUN_ID>/tau_risky_real/{rows.jsonl,run.json}
 results/LATEST/{summary.csv,summary.svg,index.html}
 ```
 
-## CI usage
-
-GitHub → Actions → run-real-mvp → Run workflow
-
-Inputs: model (default llama-3.1-8b-instant), trials, seeds
-
-Artifacts to download
-
-latest-artifacts/ for a quick look
-
-run-<timestamp>.zip for the full folder
-
-## Data layout (contract)
-
-Rows: one JSON object per trial with run_id, exp, seed, trial, model, latency_ms, tokens, success, judge_score, fail_reason, pre_call_gate, post_call_gate, input_case, timestamp
-
-Run audit (run.json): start/finish timestamps and gate audit entries; next: gate_summary (see EXP-002)
-
-## Governance (MVP)
-
-Pre/post gates are currently simple (amount thresholds + approval mention).
-
-Next: declarative policy rules + structured GateDecision + CI “GATES” summary (EXP-002).
-
-## Troubleshooting
-
-Empty HTML/CSV/SVG: Check rows.jsonl exists and has ≥1 line.
-
-All trials denied (pre-gate): Report will show “0 evaluated calls”; review policy thresholds.
-
-Missing secret: Ensure GROQ_API_KEY is set in repo secrets and available to the workflow job.
-
-Wrong run opened: make report uses RUN_ID or LATEST; pass --run_id explicitly to target a specific run.
-
 ## Why this exists
-Teams need **fast iteration** and **CI-friendly artifacts** to reason about agent risks in context—and a simple way to reach a **first REAL MVP**. DoomArena-Lab gives you:
-- **SHIM** — simulation adapters for quick, deterministic demos.
-- **REAL** — upstream DoomArena adapters when available (fallback to SHIM when not).
-- **Artifacts** — timestamped run dirs + “latest” copies; SVG plots embed nicely in PRs.
+- Enable **fast iteration** with **CI-friendly artifacts** you can attach to PRs.
+- Provide **SHIM** simulation adapters for deterministic demos and a **REAL** path to cloud models.
+- Keep runs **cheap, auditable, and explainable** (governance signals + metrics).
 
 ## Artifacts & schema
 - Each run writes to `results/<RUN_ID>/`; convenience copies go to `results/LATEST/*`.
-- Canonical files in `results/<RUN_ID>/`: `index.html`, `summary.csv`, `summary.svg`, `summary.md`, `run.json`, `notes.md`, plus per-experiment subfolders.
-- CSV includes `summary_schema: 1`; run metadata includes `results_schema: 1`.
-- The `run-demo` GitHub Action uploads **latest-artifacts** for quick inspection and a slimmed `run-<RUN_ID>` folder for pinned references.
+- Canonical files in `results/<RUN_ID>/`:
+  - `index.html` — human summary (gate-aware)
+  - `summary.csv` — tabular metrics (append-only schema)
+  - `summary.svg` — simple plot for PRs
+  - `run.json` — run metadata + **gate audit**
+  - Per-experiment folders (e.g., `tau_risky_real/rows.jsonl`)
+- Optional **thresholds** in `thresholds.yaml` (`min_trials`, `max_asr`, `min_asr`); CI can WARN by default or FAIL in strict jobs.
 
-**Thresholds (optional):** declare guardrails in `thresholds.yaml` (`min_trials`, `max_asr`, `min_asr`). CI posts a PASS/WARN/FAIL table on each PR (warn-only by default). Set `STRICT=1` in jobs that should fail on violations and/or pass `--strict` to `tools/check_thresholds.py`.
+## CI usage
+- **GitHub → Actions → `run-real-mvp` → Run workflow**
+  - **Inputs:** `model` (default `llama-3.1-8b-instant`), `trials`, `seeds`
+- **Artifacts to download**
+  - `latest-artifacts/` — quick look
+  - `run-<timestamp>.zip` — full per-run folder
 
-**`summary.csv` schema (minimum fields):**
-- `exp` – experiment name
-- `trials` – number of trials
-- `successes` – number of successful attacks (per definition)
-- `asr` – `successes / trials` (trial-weighted in plots)
-- (plus any extra columns you emit)
+## Data layout (contract)
+- **Rows (per trial):** JSON object with  
+  `run_id, exp, seed, trial, model, latency_ms, prompt_tokens, completion_tokens, total_tokens, cost_usd, success, judge_score, fail_reason, pre_call_gate, post_call_gate, input_case, timestamp`
+- **Run audit (`run.json`):** start/finish timestamps and gate audit entries.  
+  *Next:* `gate_summary` + CI “GATES” line (see EXP-002).
 
-**`summary.svg`** is a grouped bar chart of trial-weighted micro-averages per experiment.
+## Governance (MVP)
+- **Pre/post gates:** currently simple (amount thresholds + approval mention).
+- **Near-term:** declarative policy rules, structured `GateDecision`, reason codes, and a visible CI summary.
+
+## Troubleshooting
+- **Empty HTML/CSV/SVG:** Ensure `results/<RUN_ID>/tau_risky_real/rows.jsonl` exists and has ≥1 line.
+- **All trials denied (pre-gate):** Report will show “0 evaluated calls”; review policy thresholds/policy file.
+- **Missing secret:** Set repo secret **`GROQ_API_KEY`** and make sure the workflow has access.
+- **Wrong run opened:** `make report` uses `RUN_ID` or `LATEST`; pass `--run_id <RUN_ID>` explicitly.
 
 ## Modes
 - **SHIM** — simulation adapters for quick, deterministic demos.
