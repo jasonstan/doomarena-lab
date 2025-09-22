@@ -18,6 +18,19 @@ BASE_COLUMNS = [
     "run_at",
 ]
 
+APPENDED_COLUMNS = [
+    "total_trials",
+    "pre_denied",
+    "called_trials",
+    "pass_rate",
+    "p50_ms",
+    "p95_ms",
+    "total_tokens",
+    "post_warn",
+    "post_deny",
+    "top_reason",
+]
+
 
 def test_summary_csv_present_and_valid():
     summary_path = Path("results/summary.csv")
@@ -27,10 +40,12 @@ def test_summary_csv_present_and_valid():
         reader = csv.DictReader(handle)
         assert reader.fieldnames is not None, "summary.csv missing header"
         header = [column.strip() for column in reader.fieldnames]
+        expected_prefix = BASE_COLUMNS + APPENDED_COLUMNS
         if header and header[-1] == "schema":
-            assert header[:-1] == BASE_COLUMNS, f"Unexpected header order: {header}"
+            core = header[:-1]
+            assert core == expected_prefix, f"Unexpected header order: {header}"
         else:
-            assert header == BASE_COLUMNS, f"Unexpected header order: {header}"
+            assert header == expected_prefix, f"Unexpected header order: {header}"
 
         valid_rows = 0
         for row in reader:

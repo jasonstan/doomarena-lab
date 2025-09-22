@@ -20,6 +20,16 @@ EXPECTED_COLUMNS = [
     "sum_cost_usd",
     "git_commit",
     "run_at",
+    "total_trials",
+    "pre_denied",
+    "called_trials",
+    "pass_rate",
+    "p50_ms",
+    "p95_ms",
+    "total_tokens",
+    "post_warn",
+    "post_deny",
+    "top_reason",
     "schema",
 ]
 
