@@ -43,7 +43,7 @@ def build_table(rows: list[dict[str, str]]) -> str:
     body: list[str] = []
     for record in rows:
         cells = "".join(
-            f"<td>{html.escape(str(record.get(head, \"\")))}</td>" for head in headers
+            f"<td>{html.escape(str(record.get(head, '')))}</td>" for head in headers
         )
         body.append(f"<tr>{cells}</tr>")
     return (
