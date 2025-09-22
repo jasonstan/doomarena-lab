@@ -177,17 +177,18 @@ notes: ## Auto-generate run notes if script is available
 report: aggregate plot notes latest ## Publish artifacts to results/ and refresh LATEST
 	mkdir -p $(RESULTS_DIR)
 	# Apply schema v1: add 'schema' column to summary.csv and write run.json
-	python tools/apply_schema_v1.py "$(RUN_DIR)"
-	cp -f "$(RUN_DIR)/summary.csv" $(RESULTS_DIR)/summary.csv
-	cp -f "$(RUN_DIR)/summary.svg" $(RESULTS_DIR)/summary.svg
-	cp -f "$(RUN_DIR)/summary.md" $(RESULTS_DIR)/summary.md
-	cp -f "$(RUN_DIR)/notes.md" $(RESULTS_DIR)/notes.md 2>/dev/null || true
-	cp -f "$(RUN_DIR)/run.json" $(RESULTS_DIR)/run.json 2>/dev/null || true
-	# Generate per-run HTML report + mirror to LATEST
-	python tools/mk_report.py "$(RUN_DIR)"
-	if [ -e "$(RESULTS_DIR)/LATEST" ] || [ -L "$(RESULTS_DIR)/LATEST" ] || [ -f "$(RESULTS_DIR)/LATEST.path" ]; then \
-		python tools/mk_report.py "$(RESULTS_DIR)/LATEST"; \
-	fi
+python tools/apply_schema_v1.py "$(RUN_DIR)"
+cp -f "$(RUN_DIR)/summary.csv" $(RESULTS_DIR)/summary.csv
+cp -f "$(RUN_DIR)/summary.svg" $(RESULTS_DIR)/summary.svg
+cp -f "$(RUN_DIR)/summary.md" $(RESULTS_DIR)/summary.md
+cp -f "$(RUN_DIR)/notes.md" $(RESULTS_DIR)/notes.md 2>/dev/null || true
+cp -f "$(RUN_DIR)/run.json" $(RESULTS_DIR)/run.json 2>/dev/null || true
+cp -f "$(RUN_DIR)/run_report.json" $(RESULTS_DIR)/run_report.json 2>/dev/null || true
+# Generate per-run HTML report + mirror to LATEST
+python tools/mk_report.py "$(RUN_DIR)"
+if [ -e "$(RESULTS_DIR)/LATEST" ] || [ -L "$(RESULTS_DIR)/LATEST" ] || [ -f "$(RESULTS_DIR)/LATEST.path" ]; then \
+python tools/mk_report.py "$(RESULTS_DIR)/LATEST"; \
+fi
 	rm -f $(RUN_CURRENT)
 	if [ -x "$(PY)" ]; then \
 		"$(PY)" scripts/update_readme_results.py; \
