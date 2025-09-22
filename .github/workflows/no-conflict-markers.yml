@@ -1,0 +1,28 @@
+name: no-conflict-markers
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+jobs:
+  conflict-markers:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fail if conflict markers are present
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Scanning tracked files for Git conflict markers..."
+          if git ls-files -z | xargs -0 grep -nE '^(<{7}|={7}|>{7})' --color=never -H; then
+            echo "::error title=Conflict markers detected::Resolve all <<<<<<< ======= >>>>>>> sections before merging."
+            exit 1
+          fi
+          echo "No conflict markers found."
