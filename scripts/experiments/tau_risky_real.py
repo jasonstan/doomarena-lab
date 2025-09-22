@@ -14,15 +14,16 @@ import os
 import random
 import sys
 import time
+from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Iterable, Iterator, Optional
+from typing import Any, Dict, Iterable, Iterator, Optional
 
 import re
 import requests
 
-from policies.gates import post_call_guard, pre_call_guard
+from policies.gates import GateDecision, get_policy_id, post_call_guard, pre_call_guard
 
 
 ISO_TS = "%Y-%m-%dT%H:%M:%S.%fZ"
@@ -110,6 +111,54 @@ def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
     return parser.parse_args(list(argv) if argv is not None else None)
 
 
+def _decision_to_row(decision: Optional[GateDecision]) -> Optional[Dict[str, Any]]:
+    if not decision:
+        return None
+    payload: Dict[str, Any] = {
+        "decision": decision.get("decision"),
+        "reason_code": decision.get("reason_code"),
+        "message": decision.get("message"),
+        "policy_id": decision.get("policy_id"),
+    }
+    signals = decision.get("signals")
+    if signals is not None:
+        payload["signals"] = signals
+    return payload
+
+
+def _decision_value(decision: GateDecision) -> str:
+    value = str(decision.get("decision") or "allow").lower()
+    if value not in {"allow", "warn", "deny"}:
+        return "allow"
+    return value
+
+
+def _record_gate_event(
+    gate_audit: list[Dict[str, Any]],
+    stage_counts: Dict[str, Counter],
+    reason_counts: Counter,
+    *,
+    stage: str,
+    trial: int,
+    decision: GateDecision,
+) -> Dict[str, Any]:
+    event = {
+        "trial": trial,
+        "stage": stage,
+        "decision": decision.get("decision"),
+        "reason_code": decision.get("reason_code"),
+        "message": decision.get("message"),
+        "signals": decision.get("signals") or {},
+        "timestamp": now_iso(),
+    }
+    gate_audit.append(event)
+    stage_counter = stage_counts.setdefault(stage, Counter())
+    stage_counter[_decision_value(decision)] += 1
+    reason = str(decision.get("reason_code") or "UNKNOWN_REASON")
+    reason_counts[reason] += 1
+    return event
+
+
 def main(argv: Optional[Iterable[str]] = None) -> int:
     args = parse_args(argv)
 
@@ -122,30 +171,39 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     out_dir = ensure_run_dir(args.results_dir, run_id, args.exp)
     rows_path = out_dir / "rows.jsonl"
     run_meta_path = out_dir / "run.json"
+    policy_id = get_policy_id()
+    gate_audit: list[Dict[str, Any]] = []
+    stage_counts: Dict[str, Counter] = {"pre": Counter(), "post": Counter()}
+    reason_counts: Counter = Counter()
+    audit_errors: list[Dict[str, str]] = []
 
     if rows_path.exists():
         rows_path.unlink()
 
-    run_meta = {
+    run_meta: Dict[str, Any] = {
         "run_id": run_id,
         "exp": args.exp,
         "model": args.model,
         "seed": args.seed,
         "trials": args.trials,
         "started": now_iso(),
-        "pre_gate_policy": "simple_v1",
-        "post_gate_policy": "simple_v1",
-        "gate_audit": [],
+        "policy_id": policy_id,
+        "gate_audit": gate_audit,
     }
 
     with rows_path.open("a", encoding="utf-8") as handle:
         for case in risky_prompts(args.seed, args.trials):
             pre_decision = pre_call_guard(case.user)
-            run_meta["gate_audit"].append(
-                {"when": now_iso(), "stage": "pre", "decision": pre_decision, "trial": case.trial}
+            _record_gate_event(
+                gate_audit,
+                stage_counts,
+                reason_counts,
+                stage="pre",
+                trial=case.trial,
+                decision=pre_decision,
             )
 
-            if pre_decision == "deny":
+            if _decision_value(pre_decision) == "deny":
                 record = {
                     "run_id": run_id,
                     "exp": args.exp,
@@ -159,8 +217,8 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                     "cost_usd": 0.0,
                     "success": False,
                     "judge_score": 0.0,
-                    "fail_reason": "pre_call_gate_denied",
-                    "pre_call_gate": pre_decision,
+                    "fail_reason": "PROVIDER_CALL_BLOCKED_BY_POLICY",
+                    "pre_call_gate": _decision_to_row(pre_decision),
                     "post_call_gate": None,
                     "input_case": case.input_case,
                     "timestamp": now_iso(),
@@ -178,8 +236,13 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                     api_key,
                 )
                 post_decision = post_call_guard(str(response.get("content") or ""))
-                run_meta["gate_audit"].append(
-                    {"when": now_iso(), "stage": "post", "decision": post_decision, "trial": case.trial}
+                _record_gate_event(
+                    gate_audit,
+                    stage_counts,
+                    reason_counts,
+                    stage="post",
+                    trial=case.trial,
+                    decision=post_decision,
                 )
                 ok, score, reason = evaluate_success(str(response.get("content") or ""), case.policy)
                 record = {
@@ -196,8 +259,8 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                     "success": bool(ok),
                     "judge_score": float(score),
                     "fail_reason": reason,
-                    "pre_call_gate": pre_decision,
-                    "post_call_gate": post_decision,
+                    "pre_call_gate": _decision_to_row(pre_decision),
+                    "post_call_gate": _decision_to_row(post_decision),
                     "input_case": case.input_case,
                     "timestamp": now_iso(),
                 }
@@ -217,7 +280,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                     "success": False,
                     "judge_score": 0.0,
                     "fail_reason": f"exception:{type(exc).__name__}",
-                    "pre_call_gate": pre_decision,
+                    "pre_call_gate": _decision_to_row(pre_decision),
                     "post_call_gate": None,
                     "input_case": case.input_case,
                     "timestamp": now_iso(),
@@ -225,8 +288,51 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                 handle.write(json.dumps(record) + "\n")
 
     run_meta["finished"] = now_iso()
-    with run_meta_path.open("w", encoding="utf-8") as meta_handle:
-        json.dump(run_meta, meta_handle, indent=2)
+
+    pre_counts = {key: int(stage_counts.get("pre", Counter()).get(key, 0)) for key in ("allow", "warn", "deny")}
+    post_counts = {key: int(stage_counts.get("post", Counter()).get(key, 0)) for key in ("allow", "warn", "deny")}
+    run_meta["gate_summary"] = {
+        "pre": pre_counts,
+        "post": post_counts,
+        "reason_counts": {reason: int(count) for reason, count in reason_counts.items()},
+    }
+
+    if audit_errors:
+        run_meta["audit_errors"] = audit_errors
+
+    try:
+        with run_meta_path.open("w", encoding="utf-8") as meta_handle:
+            json.dump(run_meta, meta_handle, indent=2)
+    except OSError as exc:  # pragma: no cover - filesystem errors are environment-specific
+        error_entry = {"when": now_iso(), "error": f"{type(exc).__name__}: {exc}"}
+        audit_errors.append(error_entry)
+        run_meta["audit_errors"] = audit_errors
+        print(f"WARNING: failed to persist run metadata: {exc}", file=sys.stderr)
+        try:
+            with run_meta_path.open("w", encoding="utf-8") as meta_handle:
+                json.dump(run_meta, meta_handle, indent=2)
+        except OSError:
+            print("ERROR: unable to record audit errors due to repeated write failure", file=sys.stderr)
+
+    reason_top = "NONE"
+    if reason_counts:
+        reason_top = reason_counts.most_common(1)[0][0]
+    gates_line = (
+        "GATES: pre=allow:{pa}/warn:{pw}/deny:{pd} "
+        "post=allow:{sa}/warn:{sw}/deny:{sd} top_reason={reason}".format(
+            pa=pre_counts["allow"],
+            pw=pre_counts["warn"],
+            pd=pre_counts["deny"],
+            sa=post_counts["allow"],
+            sw=post_counts["warn"],
+            sd=post_counts["deny"],
+            reason=reason_top,
+        )
+    )
+    print(gates_line)
+    total_pre = sum(pre_counts.values())
+    if total_pre > 0 and pre_counts["deny"] == total_pre:
+        print(f"WARNING: all trials denied at pre gate (policy_id={policy_id})")
 
     print(json.dumps({"run_id": run_id, "out_dir": str(out_dir)}, indent=2))
     return 0
