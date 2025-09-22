@@ -1,70 +1,72 @@
 # DoomArena-Lab
 
-_DoomArena-Lab is a small, e2e-oriented companion to ServiceNow/DoomArena. It helps teams build **tiny, repeatable demos and grounded tests** with **SHIM** sims today and a clear path to **REAL** adapters (first MVP: one cloud model)._ 
+_DoomArena-Lab is a small, e2e-oriented companion to ServiceNow/DoomArena. It helps teams build **tiny, repeatable demos and grounded tests** with **SHIM** sims today and a clear path to **REAL** adapters (first MVP: one cloud model)._
+
+## What’s new (MVP progress)
+- **REAL risky slice now writes rows** → `results/<RUN_ID>/tau_risky_real/rows.jsonl` + `run.json`
+- **Aggregation works end-to-end** → `results/LATEST/summary.csv`, `summary.svg`, `index.html`
+- **Basic governance hooks** → pre/post gates recorded in rows and audited in `run.json`
+- **CI workflows**
+  - `run-demo`: local logic smoke; uploads artifacts  
+  - `run-real-mvp`: Groq model, manual dispatch with inputs (model, trials, seed)
+
+## Quickstart
+```bash
+# 1) Set provider secret
+export GROQ_API_KEY=...
+
+# 2) Run the REAL slice locally (cheap default)
+python -m scripts.experiments.tau_risky_real --trials 6 --seed 42
+
+# 3) Build report
+make report   # or: python -m scripts.aggregate_results --run_id <RUN_ID>
+
+
+Artifacts appear under:
+
+results/<RUN_ID>/tau_risky_real/{rows.jsonl,run.json}
+results/LATEST/{summary.csv,summary.svg,index.html}
+```
+
+## CI usage
+
+GitHub → Actions → run-real-mvp → Run workflow
+
+Inputs: model (default llama-3.1-8b-instant), trials, seeds
+
+Artifacts to download
+
+latest-artifacts/ for a quick look
+
+run-<timestamp>.zip for the full folder
+
+## Data layout (contract)
+
+Rows: one JSON object per trial with run_id, exp, seed, trial, model, latency_ms, tokens, success, judge_score, fail_reason, pre_call_gate, post_call_gate, input_case, timestamp
+
+Run audit (run.json): start/finish timestamps and gate audit entries; next: gate_summary (see EXP-002)
+
+## Governance (MVP)
+
+Pre/post gates are currently simple (amount thresholds + approval mention).
+
+Next: declarative policy rules + structured GateDecision + CI “GATES” summary (EXP-002).
+
+## Troubleshooting
+
+Empty HTML/CSV/SVG: Check rows.jsonl exists and has ≥1 line.
+
+All trials denied (pre-gate): Report will show “0 evaluated calls”; review policy thresholds.
+
+Missing secret: Ensure GROQ_API_KEY is set in repo secrets and available to the workflow job.
+
+Wrong run opened: make report uses RUN_ID or LATEST; pass --run_id explicitly to target a specific run.
 
 ## Why this exists
 Teams need **fast iteration** and **CI-friendly artifacts** to reason about agent risks in context—and a simple way to reach a **first REAL MVP**. DoomArena-Lab gives you:
 - **SHIM** — simulation adapters for quick, deterministic demos.
 - **REAL** — upstream DoomArena adapters when available (fallback to SHIM when not).
 - **Artifacts** — timestamped run dirs + “latest” copies; SVG plots embed nicely in PRs.
-
-## Quick Start
-
-### Option A: One-click in GitHub Actions
-1. Go to **Actions → run-demo → Run workflow** (defaults OK).
-2. When it finishes, download:
-   - **latest-artifacts** (convenience copies), and
-   - **run-<RUN_ID>** (full timestamped folder, canonical files only).
-3. Open `index.html` or drop `summary.svg` into a PR/issue.
-
-### Option B: Local
-```bash
-python3 -m venv .venv && source .venv/bin/activate
-make install
-# SHIM by default:
-make demo && make report && make open-artifacts
-# Or explicitly pin a run id:
-RUN_ID=$(date -u +%Y%m%d-%H%M%S) make demo report
-```
-
-Prefer one command? Run `make quickstart` for `install → demo → report → open-artifacts`.
-
-### Real model (first step): probe a provider
-Before wiring REAL into experiments, verify your credentials + connectivity:
-1. Copy the template and add your key (local only — never commit `.env`):
-   ```bash
-   cp .env.example .env
-   # fill GROQ_API_KEY=... (or GEMINI_API_KEY=...)
-   ```
-2. Run a probe:
-   ```bash
-   make probe-groq     # or: make probe-gemini
-   ```
-You should see `PROBE: OK` and a short model reply. In CI, set repo **Secrets**
-(e.g., `GROQ_API_KEY`) instead of using `.env`.
-
-### Optional REAL cost estimation
-Set per-1K token prices via environment variables to record estimated spend in
-`sum_cost_usd` columns:
-
-```bash
-export GROQ_PRICE_IN_PER_1K=0.20
-export GROQ_PRICE_OUT_PER_1K=0.20
-```
-
-If unset, cost fields remain blank.
-
-### Latest Results (auto)
-Local runs write the freshest artifacts directly to `results/` (updated by `make report`).
-In CI, the workflow publishes a `results/LATEST/` folder inside the run’s artifacts,
-but that directory is not created in your working copy by default.
-
-[![Latest results](results/summary.svg)](results/index.html)
-
-If you see a broken image, run:
-```bash
-make demo && make report
-```
 
 ## Artifacts & schema
 - Each run writes to `results/<RUN_ID>/`; convenience copies go to `results/LATEST/*`.
