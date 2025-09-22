@@ -1,37 +1,55 @@
-# Backlog
+<!-- BACKLOG:BEGIN -->
 
-_Goal_: a **demo-first, deployment-aware lab** that helps product teams run **grounded, repeatable** security/safety tests quickly. SHIM for speed/CI; REAL for truth.
+# DoomArena-Lab Backlog
 
-## Done recently
-- **Provider probes** (`probe-provider`): Groq/Gemini checks, fixed model IDs, clean reply + usage in Summary.
-- **Artifacts**: Reduced redundancy; per-run `run-<RUN_ID>/` + `latest-artifacts/`.
-- **REAL MVP slice**: Minimal Groq call → timestamped `results/<RUN_ID>/` with `reply.txt`, `response.json`, `usage.json`, `run.json`.
-- **Telemetry/Cost**: Latency + token usage captured; optional cost via env (`GROQ_PRICE_IN_PER_1K`, `GROQ_PRICE_OUT_PER_1K`) and displayed in `index.html`.
+_Last updated: 2025-09-22_
 
-## Now / Next (high-leverage)
-1. **REAL τ-Bench risky task (MVP)** — _in progress next_
-   - **What**: Add a τ-Bench scenario with actual risk (e.g., _PII exfiltration_ or _policy override_), run via Groq, store per-trial JSONL under `results/<RUN_ID>/tau_risky_v1/`, and flow into aggregate/plot/report.
-   - **Why**: Demonstrates **real** value: a grounded, risky test with repeatable metrics (ASR, tokens, latency, optional cost).
-   - **Spec**:
-     - New script: `scripts/experiments/tau_risky_real.py` (OpenAI-compatible client;  simple judge + policy hooks).
-     - Config: `configs/tau_risky_v1/run.yaml` with `MODE` switch, provider/model/env keys.
-     - Make targets + `run-real-tau-risky.yml` workflow.
-     - JSONL fields: `exp, seed, trial, risk_type, success, reply, tokens, latency, cost_usd`.
-2. **Policy gates v1** — guardrails before/after model call
-   - **What**: `policies/gates.py` with:
-     - Pre-call denylist/intents (e.g., explicit unsafe actions).
-     - Post-call detectors (basic PII regex; refusal guard; redaction).
-     - Write `policy_decisions` into `run.json` and `rec.policy` into JSONL.
-   - **Why**: Governance-friendly; makes research vs production boundaries explicit.
-3. **Judge clarity (rule-based)** — replace heuristic for success/failure
-   - **What**: `judge/rules.py` with explicit criteria per scenario (e.g., must contain refusal cues; must not leak PII).
-   - **Why**: Easier to explain and iterate; can later swap to an LLM judge.
+## ✅ Recently done
+- **EXP-001 — REAL slice emits JSONL rows**  
+  **Impact:** Unblocks aggregation; HTML/CSV/SVG now populate from CI.  
+  **Details:** Writes `rows.jsonl` + `run.json` per run; rows include success/judge flags and gate outcomes (basic).
 
-## Soon (supporting)
-- **Makefile help polish**: `make help` shows REAL targets; docstrings across targets.
-- **Docs**: `docs/SECURITY.md` (secrets, forks, environments), `docs/EXPERIMENTS.md` updates for REAL.
-- **Cost caps**: Optional `MAX_TOKENS`, `MAX_COST_USD` per run; fail fast when exceeded.
+- **EXP-002 (spec) — Governance gates + audit (tighten)**  
+  **Impact:** Clear contract for structured gate decisions and audit roll-up.  
+  **Details:** Policy config file, `GateDecision` shape, gate summary line for CI. (Implementation next.)
 
-## Later
-- **Multi-provider abstraction**: simple factory (Groq, Gemini) for REAL calls.
-- **Richer reports**: per-seed breakdowns, distribution plots, and artifact deep-links to raw JSONL/trace.
+## 🎯 On tap next (current sprint)
+- **EXP-002 (impl) — Governance gates + audit**  
+  **Why now:** Enforceable rules + transparent audit before scaling trials.  
+  **What to implement:** `GateDecision` schema; policy file; extend rows with `pre_call_gate.*`/`post_call_gate.*`; `run.json.gate_summary`; CI “GATES:” line; “all pre-denied” warning.
+
+- **EXP-003 — Aggregator & report: gate-aware summaries**  
+  **Why now:** Report should explain outcomes, not just plot pass rates.  
+  **What to implement:** Compute pass rate, token & latency stats; include gate breakdowns (allow/warn/deny, top reason); clear **No-Data / All-Denied** banner in `index.html`. CSV additions are backward-compatible.
+
+## ⏱ Near-term priorities (next 1–2 weeks)
+- **EXP-004 — CI guardrails & failure messaging**  
+  **Rationale:** Fail loud on misconfig (missing secret, zero rows).  
+  **Detail:** If `rows.jsonl` < trials → fail job with human message; if 0 callable trials (all pre-denied) → succeed with yellow banner + rationale.
+
+- **EXP-005 — Cost/volume controls**  
+  **Rationale:** Keep runs cheap & deterministic.  
+  **Detail:** Add `--max_tokens`, `--temperature`, soft ceiling on total tokens per run; CSV shows `total_tokens` and est. `$`.
+
+- **EXP-006 — Repro & DX polish**  
+  **Rationale:** Smoother local use.  
+  **Detail:** `make real` prints `RUN_ID`; `make open-report` opens `results/LATEST/index.html`; `.env.example`.
+
+## 📚 Backlog (later)
+- **EXP-010 — Task library expansion for risky slice**  
+  **Why:** More realistic refund-like variants.  
+  **Detail:** Tag `input_case`; ≤20 stable seeds for CI.
+
+- **EXP-011 — τ-Bench interop (optional)**  
+  **Why:** Align with community formats without CI bloat.  
+  **Detail:** Adapter layer to ingest/export τ-Bench offline.
+
+- **EXP-012 — Governance visualizations**  
+  **Why:** Faster triage.  
+  **Detail:** Stacked bar (allow/warn/deny), top reasons table, “policy drift” sparkline over last N runs.
+
+- **EXP-013 — Provider matrix**  
+  **Why:** Portability & price/perf comparisons.  
+  **Detail:** Abstract provider call; Groq/OpenAI/Local via input; same row schema.
+
+<!-- BACKLOG:END -->
