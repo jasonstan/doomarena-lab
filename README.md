@@ -154,6 +154,8 @@ The GitHub Action exposes the same inputs (`max_trails`/`max_trials`, `max_total
 ## CI
 The smoke workflow runs a tiny SHIM sweep and publishes artifacts. It also updates `results/LATEST` for quick inspection in PRs.
 
+PR runs use a dry-run (no provider calls) to keep CI safe and secret-free. REAL provider calls run on push to main with GROQ_API_KEY.
+
 ## Roadmap (short)
 - REAL MVP (priority): thin client + MODE=REAL lane for one config, manual Action run-real-mvp, env-based credentials, safe defaults (low trials/seeds).
 - Richer report (markdown/HTML summary, per-exp drill-downs)

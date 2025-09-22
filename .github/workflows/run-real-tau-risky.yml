@@ -1,5 +1,9 @@
 name: run-real-tau-risky
 on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
   workflow_dispatch:
     inputs:
       trials:  { description: "Trials per seed", default: "3" }
@@ -20,34 +24,149 @@ jobs:
     permissions: { contents: read }
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with: { python-version: "3.11" }
-      - name: Run τ-Bench risky slice
+
+      - name: Install
+        run: make install
+
+      - name: Set RUN_ID
+        run: echo "RUN_ID=$(date -u +'%Y-%m-%dT%H-%M-%SZ')" >> $GITHUB_ENV
+
+      - name: Run τ-Bench risky slice (dry-run on PR)
+        if: github.event_name == 'pull_request'
+        env:
+          RUN_ID: ${{ env.RUN_ID }}
+        run: |
+          set -euo pipefail
+          PYBIN="python"
+          if [ -x ".venv/bin/python" ]; then
+            PYBIN=".venv/bin/python"
+          fi
+          "$PYBIN" -m scripts.experiments.tau_risky_real \
+            --model "llama-3.1-8b-instant" \
+            --trials 1 \
+            --seed 1 \
+            --dry-run
+
+      - name: Run τ-Bench risky slice (REAL on main)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          TRIALS: ${{ inputs.trials }}
-          SEEDS: ${{ inputs.seeds }}
-          REAL_MODEL: ${{ inputs.model }}
-          RISK_TYPE: ${{ inputs.risk }}
+          RUN_ID: ${{ env.RUN_ID }}
         run: |
-          python -m venv .venv
-          . .venv/bin/activate
-          RUN_ID="real_${{ github.run_id }}_${{ github.run_attempt }}_$(date -u +%Y%m%d-%H%M%S)"
-          export RUN_ID
-          export RUN_DIR="results/${RUN_ID}"
-          make real-tau-risky RUN_ID="${RUN_ID}"
-      - name: Determine RUN_ID
-        id: rid
+          set -euo pipefail
+          PYBIN="python"
+          if [ -x ".venv/bin/python" ]; then
+            PYBIN=".venv/bin/python"
+          fi
+          TRIALS="${{ inputs.trials || '3' }}"
+          SEEDS_INPUT="${{ inputs.seeds || '41' }}"
+          MODEL="${{ inputs.model || 'llama-3.1-8b-instant' }}"
+          RISK_INPUT="${{ inputs.risk || 'pii_exfiltration' }}"
+          CMD=("$PYBIN" -m scripts.experiments.tau_risky_real \
+            --model "$MODEL" \
+            --trials "$TRIALS" \
+            --seeds "$SEEDS_INPUT")
+          if [ -n "$RISK_INPUT" ]; then
+            CMD+=(--risk "$RISK_INPUT")
+          fi
+          echo "Running: ${CMD[*]}"
+          "${CMD[@]}"
+
+      - name: Run τ-Bench risky slice (workflow dispatch)
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          RUN_ID: ${{ env.RUN_ID }}
         run: |
-          echo "run_id=$(cat results/.run_id)" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          PYBIN="python"
+          if [ -x ".venv/bin/python" ]; then
+            PYBIN=".venv/bin/python"
+          fi
+          TRIALS="${{ inputs.trials }}"
+          SEEDS_INPUT="${{ inputs.seeds }}"
+          MODEL="${{ inputs.model }}"
+          RISK_INPUT="${{ inputs.risk }}"
+          CMD=("$PYBIN" -m scripts.experiments.tau_risky_real \
+            --model "$MODEL" \
+            --trials "$TRIALS" \
+            --seeds "$SEEDS_INPUT")
+          if [ -n "$RISK_INPUT" ]; then
+            CMD+=(--risk "$RISK_INPUT")
+          fi
+          echo "Running: ${CMD[*]}"
+          "${CMD[@]}"
+
+      - name: Ensure run_id marker
+        env:
+          RUN_ID: ${{ env.RUN_ID }}
+        run: |
+          mkdir -p results
+          if [ ! -f results/.run_id ]; then
+            echo "${RUN_ID}" > results/.run_id
+          fi
+
+      - name: Generate report & publish latest
+        env:
+          RUN_ID: ${{ env.RUN_ID }}
+        run: |
+          make report RUN_ID="${RUN_ID}"
+          make latest
+
+      - name: Post-run data sanity
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RUN_ID: ${{ env.RUN_ID }}
+        run: |
+          set -euo pipefail
+          RID="${RUN_ID:-}"
+          if [ -z "$RID" ] && [ -f results/.run_id ]; then
+            RID="$(cat results/.run_id)"
+          fi
+          if [ -z "$RID" ]; then
+            echo "FAIL: No data rows produced for <unknown run>."
+            if [ "$EVENT_NAME" = "pull_request" ]; then
+              echo "PR dry-run detected; skipping hard failure despite missing rows."
+              exit 0
+            fi
+            exit 1
+          fi
+          ROWS_PATH="results/${RID}/tau_risky_real/rows.jsonl"
+          if [ ! -f "$ROWS_PATH" ]; then
+            echo "FAIL: No data rows produced for ${RID}."
+            if [ "$EVENT_NAME" = "pull_request" ]; then
+              echo "PR dry-run detected; skipping hard failure despite missing rows."
+              exit 0
+            fi
+            exit 1
+          fi
+          non_empty_lines=$(grep -cve '^[[:space:]]*$' "$ROWS_PATH" || true)
+          if [ "$non_empty_lines" -eq 0 ]; then
+            echo "FAIL: No data rows produced for ${RID}."
+            if [ "$EVENT_NAME" = "pull_request" ]; then
+              echo "PR dry-run detected; skipping hard failure despite missing rows."
+              exit 0
+            fi
+            exit 1
+          fi
+          echo "Post-run sanity check passed: ${non_empty_lines} row(s) present."
+
       - name: Upload run artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: real-tau-risky-${{ steps.rid.outputs.run_id }}
-          path: results/${{ steps.rid.outputs.run_id }}/
+          name: real-tau-risky-${{ env.RUN_ID || 'current' }}
+          path: |
+            results/${{ env.RUN_ID }}/
+            results/.run_id
           if-no-files-found: error
           retention-days: 7
+
       - name: Upload latest artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: latest-artifacts
@@ -57,5 +176,5 @@ jobs:
             results/LATEST/summary.md
             results/LATEST/index.html
             results/LATEST/run.json
-          if-no-files-found: ignore
+          if-no-files-found: warn
           retention-days: 7

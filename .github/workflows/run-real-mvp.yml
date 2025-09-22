@@ -1,6 +1,10 @@
 name: "Run REAL MVP"
 
 on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
   workflow_dispatch:
     inputs:
       model:
@@ -64,8 +68,6 @@ jobs:
     name: "REAL τ-Bench risky (Groq)"
     if: ${{ github.repository_owner == 'jasonstan' }}
     runs-on: ubuntu-latest
-    env:
-      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
     steps:
       - uses: actions/checkout@v4
 
@@ -76,7 +78,26 @@ jobs:
       - name: Install
         run: make install
 
+      - name: Set RUN_ID
+        run: echo "RUN_ID=$(date -u +'%Y-%m-%dT%H-%M-%SZ')" >> $GITHUB_ENV
+
+      - name: Pre-flight checks (imports only)
+        if: github.event_name == 'pull_request'
+        run: |
+          PYBIN="python"
+          if [ -x ".venv/bin/python" ]; then
+            PYBIN=".venv/bin/python"
+          fi
+          "$PYBIN" tools/verify_latest_setup.py \
+            --skip-default-checks \
+            --require-import yaml \
+            --require-import pandas \
+            --require-import matplotlib
+
       - name: Pre-flight checks (env + imports)
+        if: github.event_name != 'pull_request'
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
         run: |
           PYBIN="python"
           if [ -x ".venv/bin/python" ]; then
@@ -89,61 +110,150 @@ jobs:
             --require-import pandas \
             --require-import matplotlib
 
-      - name: REAL run (set RUN_ID, execute, publish)
-        id: real
-        shell: bash
+      - name: Run REAL τ slice (dry-run on PR)
+        if: github.event_name == 'pull_request'
         env:
-          REAL_MODEL: ${{ inputs.model }}
-          TRIALS: ${{ inputs.trials }}
-          SEEDS: ${{ inputs.seeds }}
+          RUN_ID: ${{ env.RUN_ID }}
         run: |
           set -euo pipefail
+          PYBIN="python"
+          if [ -x ".venv/bin/python" ]; then
+            PYBIN=".venv/bin/python"
+          fi
+          "$PYBIN" -m scripts.experiments.tau_risky_real \
+            --model "llama-3.1-8b-instant" \
+            --trials 1 \
+            --seed 1 \
+            --dry-run
 
-          # Single RUN_ID for the whole session
-          RUN_ID="$(date -u '+%Y%m%d-%H%M%S')"
-          export RUN_ID
-          echo "$RUN_ID" > results/.run_id
-          echo "RUN_ID=$RUN_ID" >> "$GITHUB_ENV"
-          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+      - name: Run REAL τ slice (REAL on main)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          RUN_ID: ${{ env.RUN_ID }}
+        run: |
+          set -euo pipefail
+          PYBIN="python"
+          if [ -x ".venv/bin/python" ]; then
+            PYBIN=".venv/bin/python"
+          fi
+          MODEL="${{ inputs.model || 'llama-3.1-8b-instant' }}"
+          TRIALS="${{ inputs.trials || '3' }}"
+          SEEDS_INPUT="${{ inputs.seeds || '41,42' }}"
+          MAX_TRAILS="${{ inputs.max_trails || '' }}"
+          MAX_TRIALS="${{ inputs.max_trials || '' }}"
+          MAX_TOTAL="${{ inputs.max_total_tokens || '' }}"
+          MAX_PROMPT="${{ inputs.max_prompt_tokens || '' }}"
+          MAX_COMPLETION="${{ inputs.max_completion_tokens || '' }}"
+          MAX_CALLS="${{ inputs.max_calls || '' }}"
+          TEMPERATURE="${{ inputs.temperature || '' }}"
+          FAIL_ON_BUDGET="${{ inputs.fail_on_budget && 'true' || '' }}"
+          CMD=("$PYBIN" -m scripts.experiments.tau_risky_real \
+            --model "$MODEL" \
+            --trials "$TRIALS" \
+            --seeds "$SEEDS_INPUT")
+          if [ -n "$MAX_TRAILS" ]; then
+            CMD+=(--max-trials "$MAX_TRAILS")
+          elif [ -n "$MAX_TRIALS" ]; then
+            CMD+=(--max-trials "$MAX_TRIALS")
+          fi
+          if [ -n "$MAX_TOTAL" ]; then
+            CMD+=(--max-total-tokens "$MAX_TOTAL")
+          fi
+          if [ -n "$MAX_PROMPT" ]; then
+            CMD+=(--max-prompt-tokens "$MAX_PROMPT")
+          fi
+          if [ -n "$MAX_COMPLETION" ]; then
+            CMD+=(--max-completion-tokens "$MAX_COMPLETION")
+          fi
+          if [ -n "$MAX_CALLS" ]; then
+            CMD+=(--max-calls "$MAX_CALLS")
+          fi
+          if [ -n "$TEMPERATURE" ]; then
+            CMD+=(--temperature "$TEMPERATURE")
+          fi
+          if [ "$FAIL_ON_BUDGET" = 'true' ]; then
+            CMD+=(--fail-on-budget)
+          fi
+          echo "Running: ${CMD[*]}"
+          "${CMD[@]}"
 
-          # Execute the REAL risky run (Groq) via make
-          # Target should read REAL_MODEL/TRIALS/SEEDS from env and honor RUN_ID
-          MAX_TRAILS_INPUT="${{ inputs.max_trails }}"
-          MAX_TRIALS_INPUT="${{ inputs.max_trials }}"
-          if [ -n "$MAX_TRAILS_INPUT" ]; then
-            export MAX_TRIALS="$MAX_TRAILS_INPUT"
-          elif [ -n "$MAX_TRIALS_INPUT" ]; then
-            export MAX_TRIALS="$MAX_TRIALS_INPUT"
+      - name: Run REAL τ slice (workflow dispatch)
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          RUN_ID: ${{ env.RUN_ID }}
+        run: |
+          set -euo pipefail
+          PYBIN="python"
+          if [ -x ".venv/bin/python" ]; then
+            PYBIN=".venv/bin/python"
           fi
-          if [ -n "${{ inputs.max_total_tokens }}" ]; then
-            export MAX_TOTAL_TOKENS="${{ inputs.max_total_tokens }}"
+          MODEL="${{ inputs.model }}"
+          TRIALS="${{ inputs.trials }}"
+          SEEDS_INPUT="${{ inputs.seeds }}"
+          MAX_TRAILS="${{ inputs.max_trails || '' }}"
+          MAX_TRIALS="${{ inputs.max_trials || '' }}"
+          MAX_TOTAL="${{ inputs.max_total_tokens || '' }}"
+          MAX_PROMPT="${{ inputs.max_prompt_tokens || '' }}"
+          MAX_COMPLETION="${{ inputs.max_completion_tokens || '' }}"
+          MAX_CALLS="${{ inputs.max_calls || '' }}"
+          TEMPERATURE="${{ inputs.temperature || '' }}"
+          DRY_RUN_INPUT="${{ inputs.dry_run && 'true' || '' }}"
+          FAIL_ON_BUDGET="${{ inputs.fail_on_budget && 'true' || '' }}"
+          CMD=("$PYBIN" -m scripts.experiments.tau_risky_real \
+            --model "$MODEL" \
+            --trials "$TRIALS" \
+            --seeds "$SEEDS_INPUT")
+          if [ -n "$MAX_TRAILS" ]; then
+            CMD+=(--max-trials "$MAX_TRAILS")
+          elif [ -n "$MAX_TRIALS" ]; then
+            CMD+=(--max-trials "$MAX_TRIALS")
           fi
-          if [ -n "${{ inputs.max_prompt_tokens }}" ]; then
-            export MAX_PROMPT_TOKENS="${{ inputs.max_prompt_tokens }}"
+          if [ -n "$MAX_TOTAL" ]; then
+            CMD+=(--max-total-tokens "$MAX_TOTAL")
           fi
-          if [ -n "${{ inputs.max_completion_tokens }}" ]; then
-            export MAX_COMPLETION_TOKENS="${{ inputs.max_completion_tokens }}"
+          if [ -n "$MAX_PROMPT" ]; then
+            CMD+=(--max-prompt-tokens "$MAX_PROMPT")
           fi
-          if [ -n "${{ inputs.max_calls }}" ]; then
-            export MAX_CALLS="${{ inputs.max_calls }}"
+          if [ -n "$MAX_COMPLETION" ]; then
+            CMD+=(--max-completion-tokens "$MAX_COMPLETION")
           fi
-          if [ -n "${{ inputs.temperature }}" ]; then
-            export TEMPERATURE="${{ inputs.temperature }}"
+          if [ -n "$MAX_CALLS" ]; then
+            CMD+=(--max-calls "$MAX_CALLS")
           fi
-          if [ "${{ inputs.dry_run }}" = 'true' ]; then
-            export DRY_RUN=1
+          if [ -n "$TEMPERATURE" ]; then
+            CMD+=(--temperature "$TEMPERATURE")
           fi
-          if [ "${{ inputs.fail_on_budget }}" = 'true' ]; then
-            export FAIL_ON_BUDGET=1
+          if [ "$DRY_RUN_INPUT" = 'true' ]; then
+            CMD+=(--dry-run)
           fi
-          make real-tau-risky TRIALS="${TRIALS}" SEEDS="${SEEDS}" REAL_MODEL="${REAL_MODEL}"
+          if [ "$FAIL_ON_BUDGET" = 'true' ]; then
+            CMD+=(--fail-on-budget)
+          fi
+          echo "Running: ${CMD[*]}"
+          "${CMD[@]}"
 
-          # Create report & update LATEST marker
+      - name: Ensure run_id marker
+        env:
+          RUN_ID: ${{ env.RUN_ID }}
+        run: |
+          mkdir -p results
+          if [ ! -f results/.run_id ]; then
+            echo "${RUN_ID}" > results/.run_id
+          fi
+
+      - name: Generate report & publish latest
+        env:
+          RUN_ID: ${{ env.RUN_ID }}
+        run: |
           make report RUN_ID="${RUN_ID}"
           make latest
 
-
       - name: Post-run data sanity
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RUN_ID: ${{ env.RUN_ID }}
         run: |
           set -euo pipefail
           RID="${RUN_ID:-}"
@@ -152,23 +262,39 @@ jobs:
           fi
           if [ -z "$RID" ]; then
             echo "FAIL: No data rows produced for <unknown run>. Check provider secret, network, or pre-gate denials."
+            if [ "$EVENT_NAME" = "pull_request" ]; then
+              echo "PR dry-run detected; skipping hard failure despite missing rows."
+              exit 0
+            fi
             exit 1
           fi
           ROWS_PATH="results/${RID}/tau_risky_real/rows.jsonl"
           if [ ! -f "$ROWS_PATH" ]; then
             echo "FAIL: No data rows produced for ${RID}. Check provider secret, network, or pre-gate denials."
+            if [ "$EVENT_NAME" = "pull_request" ]; then
+              echo "PR dry-run detected; skipping hard failure despite missing rows."
+              exit 0
+            fi
             exit 1
           fi
           non_empty_lines=$(grep -cve '^[[:space:]]*$' "$ROWS_PATH" || true)
           if [ "$non_empty_lines" -eq 0 ]; then
             echo "FAIL: No data rows produced for ${RID}. Check provider secret, network, or pre-gate denials."
+            if [ "$EVENT_NAME" = "pull_request" ]; then
+              echo "PR dry-run detected; skipping hard failure despite missing rows."
+              exit 0
+            fi
             exit 1
           fi
           echo "Post-run sanity check passed: ${non_empty_lines} row(s) present."
 
       - name: Verify REAL artifacts
         run: |
-          python scripts/assert_real_artifacts.py \
+          PYBIN="python"
+          if [ -x ".venv/bin/python" ]; then
+            PYBIN=".venv/bin/python"
+          fi
+          "$PYBIN" scripts/assert_real_artifacts.py \
             --html "results/${RUN_ID}/index.html" \
             --html "results/LATEST/index.html" \
             --svg "results/${RUN_ID}/summary.svg" \
@@ -214,12 +340,10 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: run-${{ steps.real.outputs.run_id || 'current' }}
+          name: run-${{ env.RUN_ID || 'current' }}
           path: |
-            results/${{ env.RUN_ID }}/summary.csv
-            results/${{ env.RUN_ID }}/summary.svg
-            results/${{ env.RUN_ID }}/index.html
-            results/${{ env.RUN_ID }}/run.json
+            results/${{ env.RUN_ID }}/
+            results/.run_id
           if-no-files-found: error
           retention-days: 7
 
