@@ -215,24 +215,67 @@ def build_overview(report: dict[str, object]) -> str:
 """
 
 
+def _clean_status_message(kind: str, message: str) -> str:
+    prefix = f"RUN {kind.upper()}:"
+    text = message.strip()
+    if text.upper().startswith(prefix):
+        body = text[len(prefix) :].strip()
+        if body:
+            return body[:1].upper() + body[1:]
+        return body
+    return text
+
+
 def build_banners(report: dict[str, object], policy_ids: list[object]) -> str:
     banners: list[str] = []
     total_trials = _as_int(report.get("total_trials"), 0)
     called_trials = _as_int(report.get("called_trials"), 0)
     encountered = bool(report.get("encountered_rows_file"))
     has_data = bool(report.get("has_row_data"))
+
+    status = report.get("status") if isinstance(report.get("status"), dict) else None
+    status_kind = ""
+    status_message = ""
+    if isinstance(status, dict):
+        status_kind = str(status.get("kind") or "").lower()
+        raw_message = str(status.get("message") or "")
+        if raw_message:
+            status_message = _clean_status_message(status_kind, raw_message)
+
+    added_error = False
+    added_warn = False
+
     if not encountered or not has_data:
+        message = status_message if status_kind == "fail" and status_message else "No data rows found for this run."
         banners.append(
-            "<div class='banner banner-error'>No data rows found for this run.</div>"
+            f"<div class='banner banner-error'>{html.escape(message)}</div>"
         )
+        added_error = True
     elif total_trials > 0 and called_trials == 0:
-        policy_text = "unknown"
-        if policy_ids:
-            policy_text = str(policy_ids[0])
+        if status_kind == "warn" and status_message:
+            warn_message = status_message
+        else:
+            policy_text = "unknown"
+            if policy_ids:
+                policy_text = str(policy_ids[0])
+            warn_message = (
+                "All trials denied by pre-gate (policy: "
+                f"{policy_text}). No model calls were made."
+            )
         banners.append(
-            "<div class='banner banner-warn'>All trials denied by pre-gate (policy: "
-            f"{html.escape(policy_text)}). No model calls were made.</div>"
+            f"<div class='banner banner-warn'>{html.escape(warn_message)}</div>"
         )
+        added_warn = True
+
+    if status_kind == "fail" and not added_error and status_message:
+        banners.append(
+            f"<div class='banner banner-error'>{html.escape(status_message)}</div>"
+        )
+    elif status_kind == "warn" and not added_warn and status_message:
+        banners.append(
+            f"<div class='banner banner-warn'>{html.escape(status_message)}</div>"
+        )
+
     return "\n".join(banners)
 
 

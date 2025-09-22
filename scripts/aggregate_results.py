@@ -4,6 +4,7 @@ import csv
 import json
 import argparse
 import math
+import os
 import sys
 from collections import Counter
 from dataclasses import dataclass, field
@@ -1030,9 +1031,13 @@ def write_run_notes(base_dir: Path, rows: List[Dict[str, str]]) -> None:
     notes_path.write_text("\n".join(lines), encoding="utf-8")
 
 
-def write_run_report(base_dir: Path, aggregation: RunAggregation) -> None:
+def write_run_report(
+    base_dir: Path, aggregation: RunAggregation, status: Optional[Dict[str, Any]] = None
+) -> None:
     payload = aggregation.to_dict()
     payload["generated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    if status is not None:
+        payload["status"] = status
     report_path = base_dir / "run_report.json"
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -1045,10 +1050,60 @@ def parse_args() -> argparse.Namespace:
         default="results",
         help="Directory to scan for jsonl files and write summaries",
     )
+    emit_default = os.environ.get("AGGREGATE_EMIT_STATUS", "always")
+    if emit_default not in {"always", "never"}:
+        emit_default = "always"
+    parser.add_argument(
+        "--emit-status",
+        choices=["always", "never"],
+        default=emit_default,
+        help="Whether to print RUN status summary lines (default: always; set to never to suppress)",
+    )
     return parser.parse_args()
 
 
-def main() -> None:
+def _format_gate_counts(counts: Dict[str, int]) -> str:
+    allow = int(counts.get("allow", 0))
+    warn = int(counts.get("warn", 0))
+    deny = int(counts.get("deny", 0))
+    return f"{allow}/{warn}/{deny}"
+
+
+def _status_summary(aggregation: RunAggregation) -> tuple[str, str]:
+    if not aggregation.encountered_rows_file or aggregation.total_trials <= 0:
+        message = "RUN FAIL: no rows.jsonl produced; see earlier error."
+        return "fail", message
+
+    called = aggregation.called_trials
+    total = aggregation.total_trials
+    if total > 0 and called == 0:
+        policy = "unknown"
+        if aggregation.policy_ids:
+            policy = sorted(aggregation.policy_ids)[0]
+        message = (
+            f"RUN WARN: all trials pre-denied (policy={policy}); no model calls were made."
+        )
+        return "warn", message
+
+    pass_rate = aggregation.pass_rate_percent()
+    pre_counts = _format_gate_counts(aggregation.pre_counts)
+    post_counts = _format_gate_counts(aggregation.post_counts)
+    top_reason = aggregation.top_reason()
+    message = (
+        "RUN OK: called={called} total={total} pass_rate={pass_rate:.1f}% "
+        "gates: pre a/w/d={pre_counts}, post a/w/d={post_counts} top_reason={top_reason}".format(
+            called=called,
+            total=total,
+            pass_rate=pass_rate,
+            pre_counts=pre_counts,
+            post_counts=post_counts,
+            top_reason=top_reason,
+        )
+    )
+    return "ok", message
+
+
+def main() -> int:
     args = parse_args()
     base_dir = Path(args.outdir).expanduser()
     base_dir.mkdir(parents=True, exist_ok=True)
@@ -1108,14 +1163,22 @@ def main() -> None:
     write_summary(summary_path, combined_rows)
     write_summary_md(base_dir, combined_rows)
     write_run_notes(base_dir, combined_rows)
-    write_run_report(base_dir, run_metrics)
 
-    if not combined_rows:
-        if empty_reason is None:
-            empty_reason = f"No usable rows in summary data — produced 0 rows under {base_dir}"
-            print(empty_reason)
-        sys.exit(3)
+    status_kind, status_message = _status_summary(run_metrics)
+    status_payload: Dict[str, Any] = {
+        "kind": status_kind,
+        "message": status_message,
+    }
+    if empty_reason:
+        status_payload["detail"] = empty_reason
+
+    write_run_report(base_dir, run_metrics, status_payload)
+
+    if args.emit_status == "always":
+        print(status_message)
+
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

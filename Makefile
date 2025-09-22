@@ -143,9 +143,9 @@ topn:
 
 aggregate: ## Aggregate per-run CSV/notes into results/<RUN_DIR>
 	if [ -x "$(PY)" ]; then \
-		"$(PY)" scripts/aggregate_results.py --outdir "$(RUN_DIR)"; \
+		"$(PY)" scripts/aggregate_results.py --outdir "$(RUN_DIR)" --emit-status=always; \
 	else \
-		python scripts/aggregate_results.py --outdir "$(RUN_DIR)"; \
+		python scripts/aggregate_results.py --outdir "$(RUN_DIR)" --emit-status=always; \
 	fi
 
 plot: ## Plot results (safe wrapper creates placeholder SVG if empty)
@@ -169,9 +169,9 @@ test: install ## Run all Python tests
 
 notes: ## Auto-generate run notes if script is available
 	if [ -x "$(PY)" ]; then \
-		"$(PY)" scripts/aggregate_results.py --outdir "$(RUN_DIR)"; \
+		"$(PY)" scripts/aggregate_results.py --outdir "$(RUN_DIR)" --emit-status=never; \
 	else \
-		python scripts/aggregate_results.py --outdir "$(RUN_DIR)"; \
+		python scripts/aggregate_results.py --outdir "$(RUN_DIR)" --emit-status=never; \
 	fi
 
 report: aggregate plot notes latest ## Publish artifacts to results/ and refresh LATEST

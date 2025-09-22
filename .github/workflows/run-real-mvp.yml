@@ -38,6 +38,19 @@ jobs:
       - name: Install
         run: make install
 
+      - name: Pre-flight checks (env + imports)
+        run: |
+          PYBIN="python"
+          if [ -x ".venv/bin/python" ]; then
+            PYBIN=".venv/bin/python"
+          fi
+          "$PYBIN" tools/verify_latest_setup.py \
+            --skip-default-checks \
+            --require-env GROQ_API_KEY \
+            --require-import yaml \
+            --require-import pandas \
+            --require-import matplotlib
+
       - name: REAL run (set RUN_ID, execute, publish)
         id: real
         shell: bash
@@ -63,6 +76,29 @@ jobs:
           make report RUN_ID="${RUN_ID}"
           make latest
 
+
+      - name: Post-run data sanity
+        run: |
+          set -euo pipefail
+          RID="${RUN_ID:-}"
+          if [ -z "$RID" ] && [ -f results/.run_id ]; then
+            RID="$(cat results/.run_id)"
+          fi
+          if [ -z "$RID" ]; then
+            echo "FAIL: No data rows produced for <unknown run>. Check provider secret, network, or pre-gate denials."
+            exit 1
+          fi
+          ROWS_PATH="results/${RID}/tau_risky_real/rows.jsonl"
+          if [ ! -f "$ROWS_PATH" ]; then
+            echo "FAIL: No data rows produced for ${RID}. Check provider secret, network, or pre-gate denials."
+            exit 1
+          fi
+          non_empty_lines=$(grep -cve '^[[:space:]]*$' "$ROWS_PATH" || true)
+          if [ "$non_empty_lines" -eq 0 ]; then
+            echo "FAIL: No data rows produced for ${RID}. Check provider secret, network, or pre-gate denials."
+            exit 1
+          fi
+          echo "Post-run sanity check passed: ${non_empty_lines} row(s) present."
 
       - name: Verify REAL artifacts
         run: |
