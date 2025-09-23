@@ -45,6 +45,7 @@ on:
         default: false
         type: boolean
 
+# Cap workflow_dispatch inputs at eight to satisfy GitHub's limit.
 # Need write to publish artifacts; keep repo read
 permissions:
   contents: read
