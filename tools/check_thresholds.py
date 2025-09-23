@@ -170,27 +170,54 @@ def _metrics_from_summary(summary_path: Path) -> Metrics:
     try:
         with summary_path.open("r", encoding="utf-8", newline="") as handle:
             reader = csv.DictReader(handle)
+            total_trials = 0
+            callable_trials = 0
+            passed_trials = 0
+            post_deny_total = 0
+            found_row = False
             for row in reader:
                 if not row:
                     continue
+
                 total = _as_int(row.get("total_trials"))
                 if total is None:
                     total = _as_int(row.get("trials"), 0)
-                callable_trials = _as_int(row.get("called_trials"))
-                if callable_trials is None:
-                    callable_trials = _as_int(row.get("callable"), 0)
+
+                callable_value = _as_int(row.get("called_trials"))
+                if callable_value is None:
+                    callable_value = _as_int(row.get("callable"), 0)
+
                 passed = _as_int(row.get("success"))
                 if passed is None:
                     passed = _as_int(row.get("successes"), 0)
-                post_deny = _as_int(row.get("post_deny"), 0) or 0
-                if total is None and callable_trials is None and passed is None:
+
+                post_deny_value = _as_int(row.get("post_deny"))
+                if post_deny_value is None:
+                    post_deny_value = 0
+
+                if (
+                    total is None
+                    and callable_value is None
+                    and passed is None
+                    and post_deny_value == 0
+                ):
                     continue
-                return Metrics(
-                    total_trials=total or 0,
-                    callable_trials=callable_trials or 0,
-                    passed_trials=passed or 0,
-                    post_deny=post_deny,
-                )
+
+                found_row = True
+                total_trials += total or 0
+                callable_trials += callable_value or 0
+                passed_trials += passed or 0
+                post_deny_total += post_deny_value or 0
+
+            if not found_row:
+                return Metrics()
+
+            return Metrics(
+                total_trials=total_trials,
+                callable_trials=callable_trials,
+                passed_trials=passed_trials,
+                post_deny=post_deny_total,
+            )
     except FileNotFoundError:
         return Metrics()
     return Metrics()
