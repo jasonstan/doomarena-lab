@@ -2,8 +2,7 @@ doomarena
 doomarena-taubench
 pytest
 pyyaml
-matplotlib
-pandas
 requests>=2.31,<3.0
-pandas>=2.2.2,<2.3
 numpy>=1.26.4,<2.0
+pandas>=2.2.2,<2.3
+matplotlib>=3.8,<3.9
