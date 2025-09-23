@@ -155,47 +155,21 @@ jobs:
           echo "Running: ${CMD[*]}"
           "${CMD[@]}"
 
-      - name: Run REAL τ slice (workflow dispatch)
+      - name: Run REAL τ slice (manual dispatch)
         if: github.event_name == 'workflow_dispatch'
         env:
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           RUN_ID: ${{ env.RUN_ID }}
-        shell: bash
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
         run: |
-          set -euo pipefail
-          PYBIN="python"
-          if [ -x ".venv/bin/python" ]; then
-            PYBIN=".venv/bin/python"
-          fi
-          MODEL="${{ inputs.model }}"
-          TRIALS="${{ inputs.trials }}"
-          SEEDS_INPUT="${{ inputs.seeds }}"
-          MAX_TOTAL="${{ inputs.max_total_tokens || '' }}"
-          MAX_CALLS="${{ inputs.max_calls || '' }}"
-          TEMPERATURE="${{ inputs.temperature || '' }}"
-          DRY_RUN_INPUT="${{ inputs.dry_run && 'true' || '' }}"
-          FAIL_ON_BUDGET="${{ inputs.fail_on_budget && 'true' || '' }}"
-          CMD=("$PYBIN" -m scripts.experiments.tau_risky_real \
-            --model "$MODEL" \
-            --trials "$TRIALS" \
-            --seeds "$SEEDS_INPUT")
-          if [ -n "$MAX_TOTAL" ]; then
-            CMD+=(--max-total-tokens "$MAX_TOTAL")
-          fi
-          if [ -n "$MAX_CALLS" ]; then
-            CMD+=(--max-calls "$MAX_CALLS")
-          fi
-          if [ -n "$TEMPERATURE" ]; then
-            CMD+=(--temperature "$TEMPERATURE")
-          fi
-          if [ "$DRY_RUN_INPUT" = 'true' ]; then
-            CMD+=(--dry-run)
-          fi
-          if [ "$FAIL_ON_BUDGET" = 'true' ]; then
-            CMD+=(--fail-on-budget)
-          fi
-          echo "Running: ${CMD[*]}"
-          "${CMD[@]}"
+          python -m scripts.experiments.tau_risky_real \
+            --model "${{ inputs.model }}" \
+            --trials "${{ inputs.trials }}" \
+            --seed "${{ inputs.seeds }}" \
+            ${{ inputs.max_total_tokens && format('--max-total-tokens {0}', inputs.max_total_tokens) || '' }} \
+            ${{ inputs.max_calls && format('--max-calls {0}', inputs.max_calls) || '' }} \
+            --temperature "${{ inputs.temperature }}" \
+            ${{ inputs.fail_on_budget && '--fail-on-budget' || '' }} \
+            ${{ inputs.dry_run && '--dry-run' || '' }}
 
       - name: Ensure run_id marker
         env:
