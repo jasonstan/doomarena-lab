@@ -28,6 +28,7 @@ jobs:
 
       - name: Set RUN_ID (once)
         id: set-run-id
+        shell: bash
         run: |
           RUN_ID="$(date -u +%Y%m%d-%H%M%S)"
           echo "RUN_ID=$RUN_ID" >> "$GITHUB_ENV"
@@ -35,6 +36,7 @@ jobs:
           echo "RUN_ID=$RUN_ID"
 
       - name: Install
+        shell: bash
         run: make install
 
       - name: Run demo (single RUN_ID with both experiments)
@@ -43,26 +45,31 @@ jobs:
           SEEDS: ${{ inputs.seeds }}
           MODE: ${{ inputs.mode }}
           RUN_ID: ${{ env.RUN_ID }}
+        shell: bash
         run: |
           make demo TRIALS="${TRIALS}" SEEDS="${SEEDS}" MODE="${MODE}" RUN_ID="${RUN_ID}"
 
       - name: Report run outputs
         env:
           RUN_ID: ${{ env.RUN_ID }}
+        shell: bash
         run: |
           make report RUN_ID="${RUN_ID}"
 
       - name: Refresh latest pointer
+        shell: bash
         run: make latest
 
       - name: On latest failure, print context
         if: failure()
+        shell: bash
         run: echo "ERR: latest pointer failed; check tools/latest_run.py and artifacts from previous steps."
 
       - name: Tidy run directory (remove duplicates)
         if: ${{ always() }}
         env:
           RUN_ID: ${{ env.RUN_ID }}
+        shell: bash
         run: |
           make tidy-run RUN_ID="${RUN_ID}"
 
