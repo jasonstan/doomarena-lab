@@ -42,21 +42,10 @@
 ## Quickstart
 ```bash
 pip install -r requirements-ci.txt   # or: make install
-
-# 1) Set provider secret
-export GROQ_API_KEY=...
-
-# 2) Run the REAL slice locally (cheap default)
-python -m scripts.experiments.tau_risky_real --trials 6 --seed 42
-
-# 3) Build report
-make report   # or: python -m scripts.aggregate_results --run_id <RUN_ID>
-
-
-Artifacts appear under:
-
-results/<RUN_ID>/tau_risky_real/{rows.jsonl,run.json}
-results/LATEST/{summary.csv,summary.svg,index.html}
+cp .env.example .env                 # edit to add GROQ_API_KEY for real calls
+make mvp                             # translator → run → aggregate (dry run by default)
+make open-report                     # opens results/LATEST/index.html
+# Real provider calls: set DRY_RUN=0 in .env or run `DRY_RUN=0 make mvp`
 ```
 
 ## Why this exists
@@ -153,9 +142,11 @@ Run `make check-thresholds` locally (`STRICT=1 make check-thresholds` to fail). 
 
 ## Make targets (TL;DR)
 - `make help` — list common targets & docs.
+- `make mvp` — end-to-end translator → REAL slice → aggregate (dry-run by default).
 - `make demo` — tiny sweep (defaults to SHIM) producing `results/<RUN_ID>/`.
 - `make xsweep CONFIG=...` — run a configurable sweep.
 - `make report` — asserts `summary.csv`/`summary.svg`; updates `results/LATEST`.
+- `make open-report` — open or print `results/LATEST/index.html`.
 - `make latest` — refreshes `results/LATEST` to the newest valid run.
 - `make open-artifacts` — opens `results/LATEST/summary.svg` and `summary.csv`.
 - `make list-runs` — list timestamped run folders with quick validity flags.
