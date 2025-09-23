@@ -46,21 +46,28 @@ jobs:
         run: |
           make demo TRIALS="${TRIALS}" SEEDS="${SEEDS}" MODE="${MODE}" RUN_ID="${RUN_ID}"
 
-      - name: Report + publish LATEST
+      - name: Report run outputs
         env:
           RUN_ID: ${{ env.RUN_ID }}
         run: |
           make report RUN_ID="${RUN_ID}"
-          make latest || true
+
+      - name: Refresh latest pointer
+        run: make latest
+
+      - name: On latest failure, print context
+        if: failure()
+        run: echo "ERR: latest pointer failed; check tools/latest_run.py and artifacts from previous steps."
 
       - name: Tidy run directory (remove duplicates)
+        if: ${{ always() }}
         env:
           RUN_ID: ${{ env.RUN_ID }}
         run: |
           make tidy-run RUN_ID="${RUN_ID}"
 
       - name: Upload full RUN_DIR
-        if: ${{ steps.set-run-id.outputs.run_id != '' }}
+        if: ${{ always() && steps.set-run-id.outputs.run_id != '' }}
         uses: actions/upload-artifact@v4
         with:
           name: run-${{ env.RUN_ID }}
@@ -69,6 +76,7 @@ jobs:
           retention-days: 7
 
       - name: Upload latest artifacts (from results/)
+        if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
           name: latest-artifacts
