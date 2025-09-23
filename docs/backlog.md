@@ -4,13 +4,13 @@
 
 _Last updated: 2025-09-23 (UTC)_
 
-## 🎯 MVP (what “good” looks like)
+## MVP scope
 
 A single command / CI run that goes from a tiny, declarative **threat model** → **deterministic cases** → **governed execution** on a low-cost model → **gate-aware report** (CSV/SVG/HTML) → **CI verdict** (**OK / WARN / FAIL**).
 
-**Why this matters (value):** teams can turn a written risk/threat model into **evidence** in hours, not weeks—cheaply, repeatably, and with governance you can explain.
+**Why this matters:** teams can turn a written risk/threat model into **evidence** in hours, not weeks—cheaply, repeatably, and with governance you can explain.
 
-## 📏 Success metrics (plain English)
+## 📏 Success metrics
 
 - **Determinism — Same input ⇒ same cases.**  
   What we measure: Given `threat_model.yaml` + seed, `cases.jsonl` and `input_case` order are identical.  
@@ -52,7 +52,7 @@ A single command / CI run that goes from a tiny, declarative **threat model** �
 | **Perf & scale guardrails** | 🟡 | MVP scale OK; streaming for very large runs TBD. |
 | **Config validation** | 🟡 | Basic checks only; formal schemas TBD. |
 
-## ✅ Recently shipped (highlights)
+## ✅ Recently shipped
 
 - **EXP-006 (DX):** `make mvp`, `.env.example`, `make open-report`.  
 - **EXP-007:** Threat model → deterministic cases translator.  
@@ -63,7 +63,7 @@ A single command / CI run that goes from a tiny, declarative **threat model** �
 - **Audit & CI hardening:** Python 3.11, pinned deps, preflight, YAML fixes, artifact guards.  
 - **Tests:** Offline regression for CLI, generation, evaluator, thresholds.
 
-## 🧭 On-tap next (1-week plan)
+## Next (1-week plan)
 
 ### EXP-012 — **Config validation (schemas + preflight)**
 **User story:** As a contributor, if I typo a field in `threat_model.yaml`/`gates.yaml`/`evaluator.yaml`/`thresholds.yaml`, I get a crisp validation error during preflight (which field, why) before any run starts.  
@@ -80,7 +80,7 @@ A single command / CI run that goes from a tiny, declarative **threat model** �
 **Value:** Clear guardrails for cost/time.  
 **Done when:** Consistent budget fields in `run.json`; badge in HTML; thresholds/verifier unchanged.
 
-## ⏱ Near-term (2–3 weeks)
+## Near-term (2–3 weeks)
 
 ### EXP-015 — **Provider matrix (same slice, multiple backends)**
 **User story:** As a platform owner, I flip a selector to run the same slice on Groq/OpenAI/Local and compare CSVs.  
@@ -102,7 +102,7 @@ A single command / CI run that goes from a tiny, declarative **threat model** �
 **Value:** Faster triage; no secret leakage.  
 **Done when:** Redacted snippets in per-run folder; opt-in; off on PR by default.
 
-## 📚 Later / lower-priority backlog
+## Later / lower-priority backlog
 
 ### EXP-019 — **Richer report visuals**
 **User story:** As a stakeholder, I see stacked allow/warn/deny by reason, a trend sparkline, and top-N exemplar failures.  
