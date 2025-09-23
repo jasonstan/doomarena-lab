@@ -100,6 +100,7 @@ jobs:
       - name: Run REAL τ slice (dry-run on PR)
         if: github.event_name == 'pull_request'
         env:
+          GROQ_API_KEY: placeholder
           RUN_ID: ${{ env.RUN_ID }}
         run: |
           set -euo pipefail
@@ -147,7 +148,7 @@ jobs:
 
       - name: Aggregate & build report
         run: |
-          python -m scripts.aggregate_results --run_id "$RUN_ID" || true
+          python -m scripts.aggregate_results --outdir "results/${RUN_ID}" || true
           mkdir -p results
           [ -f results/.run_id ] || echo "$RUN_ID" > results/.run_id
 
