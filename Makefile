@@ -9,7 +9,7 @@
 #   RUN_ID  ?= (timestamp default)     # results/<RUN_ID>; persisted via results/.run_id
 # ------------------------------------------------------------------------------
 
-.PHONY: venv install test run sweep aggregate report scaffold check-schema plot notes sweep3 real1 xrun xsweep xsweep-all topn demo test-unit ci latest tidy-run open-artifacts list-runs journal install-tau help vars check-thresholds
+.PHONY: venv install test run sweep aggregate report scaffold check-schema plot notes sweep3 real1 xrun xsweep xsweep-all topn demo test-unit ci latest tidy-run open-artifacts open-report list-runs journal install-tau help vars check-thresholds mvp
 
 SHELL := /bin/bash
 
@@ -255,6 +255,88 @@ tidy-run: ## Remove redundant files in results/$(RUN_ID) (timestamped copies, PN
 
 open-artifacts: latest
 	@$(PYTHON) tools/open_artifacts.py --results "$(RESULTS_DIR)/LATEST"
+
+.ONESHELL: mvp
+mvp: ## Translator → REAL slice → aggregate + refresh LATEST (dry-run by default)
+	@set -euo pipefail
+	if [ -f .env ]; then
+		set -a
+		. ./.env
+		set +a
+	fi
+	MODEL_VALUE="$${MODEL:-llama-3.1-8b-instant}"
+	TRIALS_VALUE="$${TRIALS:-3}"
+	SEED_VALUE="$${SEED:-42}"
+	DRY_RAW="$${DRY_RUN:-1}"
+	RUN_ID_VALUE="$${RUN_ID:-$(RUN_ID)}"
+	DRY_FLAG=""
+	DRY_CANON="0"
+	case "$$DRY_RAW" in
+	1|true|TRUE|True|yes|YES|on|ON) DRY_FLAG="--dry-run"; DRY_CANON="1" ;;
+	esac
+	export MODEL="$$MODEL_VALUE" TRIALS="$$TRIALS_VALUE" SEED="$$SEED_VALUE" DRY_RUN="$$DRY_RAW" RUN_ID="$$RUN_ID_VALUE"
+	if [ "$$DRY_CANON" = "1" ] && [ -z "$${GROQ_API_KEY:-}" ]; then
+		export GROQ_API_KEY="stub-dry-run-key"
+	fi
+	if [ "$$DRY_CANON" != "1" ] && [ -z "$${GROQ_API_KEY:-}" ]; then
+		echo "ERROR: GROQ_API_KEY is required for real runs (set it in .env or the environment)." >&2
+		exit 2
+	fi
+	if [ -f specs/threat_model.yaml ]; then
+		echo "== Translating specs/threat_model.yaml =="
+		if [ -n "$${MVP_TRANSLATE_CMD:-}" ]; then
+			eval "$${MVP_TRANSLATE_CMD}"
+		else
+			translator_ran=0
+			for candidate in scripts/translate_threat_model.py tools/translate_threat_model.py scripts/threat_model_to_cases.py tools/threat_model_to_cases.py scripts/translator.py tools/translator.py; do
+				if [ -f "$$candidate" ]; then
+					$(PYTHON) "$$candidate" --input specs/threat_model.yaml
+					translator_ran=1
+					break
+				fi
+				done
+			if [ "$$translator_ran" -eq 0 ]; then
+				echo "ERROR: specs/threat_model.yaml present but no translator script found. Set MVP_TRANSLATE_CMD to override." >&2
+				exit 3
+			fi
+		fi
+	fi
+	echo "== Running REAL slice (seed=$$SEED_VALUE trials=$$TRIALS_VALUE model=$$MODEL_VALUE dry_run=$$DRY_CANON) =="
+	$(PYTHON) -m scripts.experiments.tau_risky_real --model "$$MODEL_VALUE" --trials "$$TRIALS_VALUE" --seed "$$SEED_VALUE" $$DRY_FLAG
+	RUN_ROOT="$(RESULTS_DIR)/$$RUN_ID_VALUE"
+	echo "== Aggregating results in $$RUN_ROOT =="
+	$(PYTHON) -m scripts.aggregate_results --outdir "$$RUN_ROOT" --emit-status=always
+	$(PYTHON) tools/apply_schema_v1.py "$$RUN_ROOT"
+	$(PYTHON) tools/plot_safe.py --outdir "$$RUN_ROOT"
+	$(PYTHON) tools/mk_report.py "$$RUN_ROOT"
+	$(PYTHON) tools/latest_run.py "$(RESULTS_DIR)" "$(LATEST_LINK)"
+	if [ -e "$(LATEST_LINK)" ] || [ -L "$(LATEST_LINK)" ]; then
+		$(PYTHON) tools/mk_report.py "$(LATEST_LINK)"
+	fi
+	ROWS_WRITTEN="$$(RUN_ID="$$RUN_ID_VALUE" $(PYTHON) - <<-'PY'
+	import os
+	from pathlib import Path
+	
+	run_id = os.environ.get("RUN_ID", "")
+	rows_path = Path("$(RESULTS_DIR)") / run_id / "tau_risky_real" / "rows.jsonl"
+	print(sum(1 for line in rows_path.read_text(encoding="utf-8").splitlines() if line.strip()) if rows_path.exists() else 0)
+	PY
+	)"
+	INDEX_PATH="$$(RUN_ID="$$RUN_ID_VALUE" $(PYTHON) - <<-'PY'
+	import os
+	from pathlib import Path
+	
+	run_id = os.environ.get("RUN_ID", "")
+	index_path = Path("$(RESULTS_DIR)") / run_id / "index.html"
+	print(index_path.resolve())
+	PY
+	)"
+	echo "MVP complete: run_id=$$RUN_ID_VALUE rows=$$ROWS_WRITTEN index=$$INDEX_PATH"
+
+.PHONY: open-report
+open-report: ## Open results/LATEST/index.html locally (prints path in CI)
+	@set -euo pipefail
+	$(PYTHON) tools/open_report.py "$(RESULTS_DIR)/LATEST"
 
 #
 # === Provider probes ===
