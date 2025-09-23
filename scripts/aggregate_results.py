@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-import csv
-import json
 import argparse
+import ast
+import csv
+import hashlib
+import json
 import math
 import os
 import sys
@@ -10,7 +12,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
 # NOTE: first step toward de-duplication — leverage shared helpers where useful.
 if __package__ in (None, ""):
@@ -45,6 +47,10 @@ SUMMARY_COLUMNS: Tuple[str, ...] = (
     "post_warn",
     "post_deny",
     "top_reason",
+    "pre_decision",
+    "pre_reason",
+    "post_decision",
+    "post_reason",
     "calls_made",
     "tokens_prompt_sum",
     "tokens_completion_sum",
@@ -143,6 +149,8 @@ class RunAggregation:
     reason_counts_by_decision: Dict[str, Counter[str]] = field(
         default_factory=lambda: {key: Counter() for key in ("allow", "warn", "deny")}
     )
+    pre_reason_counts: Counter[str] = field(default_factory=Counter)
+    post_reason_counts: Counter[str] = field(default_factory=Counter)
     rows_paths: List[str] = field(default_factory=list)
     run_json_paths: List[str] = field(default_factory=list)
     policy_ids: set[str] = field(default_factory=set)
@@ -162,6 +170,10 @@ class RunAggregation:
     evaluator_version: Optional[str] = None
     evaluator_config_path: Optional[str] = None
     evaluator_rules_total: Optional[int] = None
+    gates_version: Optional[str] = None
+    gates_mode: Optional[str] = None
+    gates_config_path: Optional[str] = None
+    gates_active_rules: set[str] = field(default_factory=set)
 
     def update_from_rows(
         self,
@@ -220,12 +232,47 @@ class RunAggregation:
                 hit_value = _stringify(budget_meta.get("budget_hit")).strip()
                 if hit_value:
                     self.budget_hit_value = hit_value
+            gates_meta = run_meta.get("gates")
+            if isinstance(gates_meta, dict):
+                version_text = _stringify(gates_meta.get("version")).strip()
+                if version_text:
+                    self.gates_version = version_text
+                mode_text = _stringify(gates_meta.get("mode")).strip()
+                if mode_text:
+                    self.gates_mode = mode_text
+                config_text = _stringify(gates_meta.get("config_path")).strip()
+                if config_text:
+                    self.gates_config_path = config_text
+                active_rules = gates_meta.get("active_rule_ids")
+                if isinstance(active_rules, (list, tuple, set)):
+                    for rule in active_rules:
+                        rule_text = _stringify(rule).strip()
+                        if rule_text:
+                            self.gates_active_rules.add(rule_text)
         for entry in rows:
             self.total_trials += 1
-            pre_decision, pre_reason, pre_policy = _normalise_gate(entry.get("pre_call_gate"))
-            if pre_policy:
-                self.policy_ids.add(pre_policy)
+            fallback_pre_decision, fallback_pre_reason, fallback_identifier = _normalise_gate(
+                entry.get("pre_call_gate")
+            )
+            if fallback_identifier:
+                self.policy_ids.add(fallback_identifier)
+            pre_gate_payload = entry.get("pre_gate")
+            if isinstance(pre_gate_payload, dict):
+                decision_value = _stringify(pre_gate_payload.get("decision")).strip().lower()
+                if decision_value not in {"allow", "warn", "deny"}:
+                    decision_value = "allow"
+                pre_decision = decision_value
+                reason_text = _stringify(pre_gate_payload.get("reason_code")).strip()
+                pre_reason = reason_text or None
+                rule_text = _stringify(pre_gate_payload.get("rule_id")).strip()
+                if rule_text and rule_text != "policy.default":
+                    self.gates_active_rules.add(rule_text)
+            else:
+                pre_decision = fallback_pre_decision
+                pre_reason = fallback_pre_reason
             _increment_gate(self.pre_counts, pre_decision)
+            if pre_reason:
+                self.pre_reason_counts[pre_reason] += 1
             self._record_reason(pre_decision, pre_reason)
             attempted = pre_decision != "deny"
             fail_reason_value = _stringify(entry.get("fail_reason")).strip()
@@ -244,6 +291,8 @@ class RunAggregation:
                 callable_flag = attempted and not skipped_budget and not is_dry_run
             else:
                 callable_flag = callable_opt
+            if callable_flag and (skipped_budget or is_dry_run):
+                callable_flag = False
             if callable_flag:
                 self.callable_trials += 1
                 self.calls_made_count += 1
@@ -270,23 +319,55 @@ class RunAggregation:
                 if cost_value is not None:
                     self.estimated_cost += float(cost_value)
                     self.cost_present = True
-                post_decision, post_reason, post_policy = _normalise_gate(
+                fallback_post_decision, fallback_post_reason, fallback_identifier = _normalise_gate(
                     entry.get("post_call_gate")
                 )
-                if post_policy:
-                    self.policy_ids.add(post_policy)
+                if fallback_identifier:
+                    self.policy_ids.add(fallback_identifier)
+                post_gate_payload = entry.get("post_gate")
+                if isinstance(post_gate_payload, dict):
+                    post_value = _stringify(post_gate_payload.get("decision")).strip().lower()
+                    if post_value not in {"allow", "warn", "deny"}:
+                        post_value = "allow"
+                    post_decision = post_value
+                    post_reason_text = _stringify(post_gate_payload.get("reason_code")).strip()
+                    post_reason = post_reason_text or None
+                    post_rule = _stringify(post_gate_payload.get("rule_id")).strip()
+                    if post_rule and post_rule != "policy.default":
+                        self.gates_active_rules.add(post_rule)
+                else:
+                    post_decision = fallback_post_decision
+                    post_reason = fallback_post_reason
                 _increment_gate(self.post_counts, post_decision)
+                if post_reason:
+                    self.post_reason_counts[post_reason] += 1
                 self._record_reason(post_decision, post_reason)
                 if post_decision == "warn":
                     self.post_warn += 1
                 elif post_decision == "deny":
                     self.post_deny += 1
             else:
-                post_decision, post_reason, post_policy = _normalise_gate(
+                fallback_post_decision, fallback_post_reason, fallback_identifier = _normalise_gate(
                     entry.get("post_call_gate")
                 )
-                if post_policy:
-                    self.policy_ids.add(post_policy)
+                if fallback_identifier:
+                    self.policy_ids.add(fallback_identifier)
+                post_gate_payload = entry.get("post_gate")
+                if isinstance(post_gate_payload, dict):
+                    post_value = _stringify(post_gate_payload.get("decision")).strip().lower()
+                    if post_value not in {"allow", "warn", "deny"}:
+                        post_value = "allow"
+                    post_decision = post_value
+                    post_reason_text = _stringify(post_gate_payload.get("reason_code")).strip()
+                    post_reason = post_reason_text or None
+                    post_rule = _stringify(post_gate_payload.get("rule_id")).strip()
+                    if post_rule and post_rule != "policy.default":
+                        self.gates_active_rules.add(post_rule)
+                else:
+                    post_decision = fallback_post_decision
+                    post_reason = fallback_post_reason
+                if post_reason:
+                    self.post_reason_counts[post_reason] += 1
                 self._record_reason(post_decision, post_reason)
 
     def _record_reason(self, decision: str, reason: Optional[str]) -> None:
@@ -295,6 +376,33 @@ class RunAggregation:
         self.reason_counts[reason] += 1
         bucket = self.reason_counts_by_decision.setdefault(decision, Counter())
         bucket[reason] += 1
+
+    def _top_decision(self, counts: Dict[str, int]) -> str:
+        if not counts:
+            return "-"
+        best = -1
+        winners: List[str] = []
+        for key, value in counts.items():
+            if value > best:
+                best = value
+                winners = [key]
+            elif value == best:
+                winners.append(key)
+        if best <= 0:
+            return "-"
+        return sorted(winners)[0]
+
+    def _top_reason_for_stage(self, counter: Counter[str]) -> str:
+        if not counter:
+            return "-"
+        best = counter.most_common(1)
+        if not best:
+            return "-"
+        top_count = best[0][1]
+        winners = [reason for reason, count in counter.items() if count == top_count]
+        if not winners:
+            return "-"
+        return sorted(winners)[0]
 
     def register_run_json_path(self, path: Path) -> None:
         if not path.exists():
@@ -365,6 +473,10 @@ class RunAggregation:
             "post_warn": str(self.post_warn),
             "post_deny": str(self.post_deny),
             "top_reason": self.top_reason(),
+            "pre_decision": self._top_decision(self.pre_counts),
+            "pre_reason": self._top_reason_for_stage(self.pre_reason_counts),
+            "post_decision": self._top_decision(self.post_counts),
+            "post_reason": self._top_reason_for_stage(self.post_reason_counts),
             "calls_made": str(calls_made),
             "tokens_prompt_sum": str(tokens_prompt_sum),
             "tokens_completion_sum": str(tokens_completion_sum),
@@ -416,6 +528,16 @@ class RunAggregation:
             "gates": {
                 "pre": {key: int(self.pre_counts.get(key, 0)) for key in ("allow", "warn", "deny")},
                 "post": {key: int(self.post_counts.get(key, 0)) for key in ("allow", "warn", "deny")},
+                "version": self.gates_version,
+                "mode": self.gates_mode,
+                "config_path": self.gates_config_path,
+                "active_rule_ids": sorted(self.gates_active_rules),
+                "summary": {
+                    "pre_decision": self._top_decision(self.pre_counts),
+                    "pre_reason": self._top_reason_for_stage(self.pre_reason_counts),
+                    "post_decision": self._top_decision(self.post_counts),
+                    "post_reason": self._top_reason_for_stage(self.post_reason_counts),
+                },
             },
             "top_reason": self.top_reason(),
             "reason_counts": {
@@ -536,6 +658,22 @@ def _parse_optional_bool(value: Any) -> Optional[bool]:
             return True
         if text in {"false", "0", "no", "off"}:
             return False
+    return None
+
+
+def _parse_config_blob(text: str) -> Optional[Mapping[str, Any]]:
+    cleaned = _stringify(text).strip()
+    if not cleaned:
+        return None
+    try:
+        data = json.loads(cleaned)
+    except json.JSONDecodeError:
+        try:
+            data = ast.literal_eval(cleaned)
+        except (ValueError, SyntaxError):
+            return None
+    if isinstance(data, Mapping):
+        return data
     return None
 
 
@@ -824,25 +962,43 @@ def build_row(path: Path, header: Dict[str, Any], summary: Dict[str, Any]) -> Di
 
     exp = _stringify(header.get("exp"))
     config = _stringify(header.get("config"))
+    config_meta = _parse_config_blob(config)
+    if not exp and config_meta:
+        exp_value = config_meta.get("exp")
+        if exp_value is not None:
+            exp = _stringify(exp_value)
     cfg_hash_value = _stringify(header.get("cfg_hash"))
+    if not cfg_hash_value:
+        if config_meta and config_meta.get("cfg_hash"):
+            cfg_hash_value = _stringify(config_meta.get("cfg_hash"))
+        elif config:
+            cfg_hash_value = hashlib.sha1(config.encode("utf-8")).hexdigest()[:12]
 
     mode = _stringify(header.get("mode"))
     if meta and meta.get("mode"):
         mode = _stringify(meta.get("mode"))
+    elif config_meta and config_meta.get("mode"):
+        mode = _stringify(config_meta.get("mode"))
 
     git_commit = _stringify(header.get("git_commit"))
     if not git_commit and meta and meta.get("git_commit"):
         git_commit = _stringify(meta.get("git_commit"))
     elif not git_commit and meta and meta.get("git_sha"):
         git_commit = _stringify(meta.get("git_sha"))
+    elif not git_commit:
+        git_commit = "UNKNOWN"
 
     run_at = _stringify(header.get("run_at"))
     if meta and meta.get("timestamp"):
         run_at = _stringify(meta.get("timestamp"))
+    elif not run_at:
+        run_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     seeds = _collect_seeds(header)
     if meta and meta.get("seeds") is not None:
         seeds = _stringify_seeds(meta.get("seeds"))
+    elif config_meta and config_meta.get("seed") is not None:
+        seeds = _stringify_seeds(config_meta.get("seed"))
 
     trials = _normalise_int(summary.get("trials"))
     if meta and meta.get("trials") is not None:
@@ -871,6 +1027,18 @@ def build_row(path: Path, header: Dict[str, Any], summary: Dict[str, Any]) -> Di
         cost_from_summary = _parse_optional_float(summary.get("sum_cost_usd"))
         if cost_from_summary is not None:
             cost_sum = cost_from_summary
+
+    if not exp_id:
+        if config_meta and (config_meta.get("exp") or exp):
+            exp_candidate = _stringify(config_meta.get("exp") or exp)
+            seed_candidate = _stringify(config_meta.get("seed"))
+            if exp_candidate:
+                if seed_candidate:
+                    exp_id = f"{exp_candidate}:{seed_candidate}"
+                else:
+                    exp_id = exp_candidate
+        elif exp:
+            exp_id = exp
 
     row = {
         "exp_id": exp_id,

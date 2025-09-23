@@ -275,6 +275,37 @@ def build_overview(report: dict[str, object]) -> str:
     calls_made = _as_int(usage.get("calls_made") if isinstance(usage, dict) else 0, called)
     budget_hit = str((budget.get("budget_hit") if isinstance(budget, dict) else "") or "none")
     stopped_early = _as_bool(budget.get("stopped_early") if isinstance(budget, dict) else None, budget_hit.lower() != "none")
+    gate_summary = gates.get("summary") if isinstance(gates, dict) else {}
+    if isinstance(gate_summary, dict):
+        pre_top_decision = str(gate_summary.get("pre_decision") or "-")
+        pre_top_reason = str(gate_summary.get("pre_reason") or "-")
+        post_top_decision = str(gate_summary.get("post_decision") or "-")
+        post_top_reason = str(gate_summary.get("post_reason") or "-")
+    else:
+        pre_top_decision = post_top_decision = "-"
+        pre_top_reason = post_top_reason = "-"
+    mode_display = str(gates.get("mode") or "").strip().upper() if isinstance(gates, dict) else ""
+    if not mode_display:
+        mode_display = "ALLOW"
+    version_display = str(gates.get("version") or "").strip() if isinstance(gates, dict) else ""
+    gate_meta_line = f"mode {mode_display}"
+    if version_display:
+        gate_meta_line += f" · v{version_display}"
+    top_parts: list[str] = []
+    if pre_top_decision and pre_top_decision != "-":
+        pre_piece = pre_top_decision.upper()
+        if pre_top_reason and pre_top_reason != "-":
+            pre_piece += f" ({pre_top_reason})"
+        top_parts.append(f"pre {pre_piece}")
+    if post_top_decision and post_top_decision != "-":
+        post_piece = post_top_decision.upper()
+        if post_top_reason and post_top_reason != "-":
+            post_piece += f" ({post_top_reason})"
+        top_parts.append(f"post {post_piece}")
+    gate_sub_parts = [gate_meta_line, f"post warn/deny: {post_warn}/{post_deny}"]
+    if top_parts:
+        gate_sub_parts.append(" · ".join(top_parts))
+    gate_subline = " · ".join(gate_sub_parts)
     budget_line = (
         "<div class='overview-budget'>Budget: calls {calls} | tokens {tokens} | "
         "stopped_early {stopped} | hit {hit}</div>"
@@ -310,7 +341,7 @@ def build_overview(report: dict[str, object]) -> str:
   <div class='overview-card'>
     <div class='label'>Gates</div>
     <div class='value'>pre: {html.escape(pre_text)} · post: {html.escape(post_text)}</div>
-    <div class='sub'>post warn/deny: {html.escape(f"{post_warn}/{post_deny}")}</div>
+    <div class='sub'>{html.escape(gate_subline)}</div>
   </div>
   <div class='overview-card'>
     <div class='label'>Top reason</div>

@@ -18,12 +18,11 @@ from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, Iterator, Optional
+from typing import TYPE_CHECKING, Any, Dict, Iterable, Iterator, Optional
 
-import requests
-
-from policies.evaluator import Evaluator, EvaluatorConfigError
-from policies.gates import GateDecision, get_policy_id, post_call_guard, pre_call_guard
+if TYPE_CHECKING:
+    from policies.evaluator import Evaluator, EvaluatorConfigError
+    from policies.gates import GateDecision, GateEngine, GatesConfigError, load_gates
 
 
 ISO_TS = "%Y-%m-%dT%H:%M:%S.%fZ"
@@ -79,7 +78,17 @@ def _env_flag(name: str) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _merge_limit(cli_value: Optional[int], gate_value: Optional[int]) -> Optional[int]:
+    if gate_value is None:
+        return cli_value
+    if cli_value is None:
+        return gate_value
+    return min(cli_value, gate_value)
+
+
 def groq_chat(model: str, messages: Iterable[Dict[str, str]], api_key: str, *, temperature: float = 0.2) -> Dict[str, Optional[object]]:
+    import requests
+
     url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     payload = {"model": model, "messages": list(messages), "temperature": temperature, "stream": False}
@@ -266,6 +275,11 @@ def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
         default=None,
         help="Path to evaluator rules file (default: policies/evaluator.yaml)",
     )
+    parser.add_argument(
+        "--gates",
+        default=None,
+        help="Path to governance gates config (default: policies/gates.yaml)",
+    )
     parser.add_argument("--exp", default="tau_risky_real")
     parser.add_argument("--max-trials", type=int, default=_env_int("MAX_TRIALS"))
     parser.add_argument("--max-calls", type=int, default=_env_int("MAX_CALLS"))
@@ -313,18 +327,21 @@ def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
     return args
 
 
-def _decision_to_row(decision: Optional[GateDecision]) -> Optional[Dict[str, Any]]:
+def _decision_to_row(decision: Optional[GateDecision], policy_label: str) -> Optional[Dict[str, Any]]:
     if not decision:
         return None
     payload: Dict[str, Any] = {
         "decision": decision.get("decision"),
         "reason_code": decision.get("reason_code"),
-        "message": decision.get("message"),
-        "policy_id": decision.get("policy_id"),
+        "rule_id": decision.get("rule_id"),
+        "policy_id": policy_label,
     }
-    signals = decision.get("signals")
-    if signals is not None:
-        payload["signals"] = signals
+    message = decision.get("message")
+    if message:
+        payload["message"] = message
+    data = decision.get("data")
+    if data:
+        payload["data"] = data
     return payload
 
 
@@ -333,6 +350,16 @@ def _decision_value(decision: GateDecision) -> str:
     if value not in {"allow", "warn", "deny"}:
         return "allow"
     return value
+
+
+def _compact_gate(decision: Optional[GateDecision]) -> Optional[Dict[str, Any]]:
+    if not decision:
+        return None
+    return {
+        "decision": decision.get("decision"),
+        "reason_code": decision.get("reason_code"),
+        "rule_id": decision.get("rule_id"),
+    }
 
 
 def _record_gate_event(
@@ -349,8 +376,9 @@ def _record_gate_event(
         "stage": stage,
         "decision": decision.get("decision"),
         "reason_code": decision.get("reason_code"),
+        "rule_id": decision.get("rule_id"),
         "message": decision.get("message"),
-        "signals": decision.get("signals") or {},
+        "data": decision.get("data") or {},
         "timestamp": now_iso(),
     }
     gate_audit.append(event)
@@ -362,6 +390,9 @@ def _record_gate_event(
 
 
 def main(argv: Optional[Iterable[str]] = None) -> int:
+    from policies.evaluator import Evaluator, EvaluatorConfigError
+    from policies.gates import GatesConfigError, load_gates
+
     args = parse_args(argv)
 
     api_key = os.environ.get("GROQ_API_KEY")
@@ -390,6 +421,29 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
 
+    if args.gates:
+        gates_path = Path(args.gates).expanduser()
+        if not gates_path.is_absolute():
+            gates_path = Path.cwd() / gates_path
+    else:
+        gates_path = Path(__file__).resolve().parents[2] / "policies" / "gates.yaml"
+    try:
+        gates_engine = load_gates(gates_path)
+    except GatesConfigError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+
+    gate_limits = gates_engine.limits
+    gates_info: Dict[str, Any] = {
+        "config_path": str(gates_engine.path),
+        "version": gates_engine.version,
+        "mode": gates_engine.mode,
+        "mode_source": gates_engine.mode_source,
+        "limits": dict(gate_limits),
+        "active_rule_ids": [],
+    }
+    policy_label = gates_engine.policy_label
+
     run_id = mk_run_id()
     out_dir = ensure_run_dir(args.results_dir, run_id, args.exp)
     results_root = Path(args.results_dir)
@@ -398,12 +452,12 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     run_marker_path.write_text(f"{run_id}\n", encoding="utf-8")
     rows_path = out_dir / "rows.jsonl"
     run_meta_path = out_dir / "run.json"
-    policy_id = get_policy_id()
     gate_audit: list[Dict[str, Any]] = []
     stage_counts: Dict[str, Counter] = {"pre": Counter(), "post": Counter()}
     reason_counts: Counter = Counter()
     audit_errors: list[Dict[str, str]] = []
     active_rule_ids: set[str] = set()
+    gate_rule_ids: set[str] = set()
     callable_trials = 0
     successful_trials = 0
 
@@ -417,7 +471,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         "seed": args.seed,
         "trials": args.trials,
         "started": now_iso(),
-        "policy_id": policy_id,
+        "policy_id": policy_label,
         "evaluator": {
             "config_path": str(evaluator_path),
             "version": evaluator.version,
@@ -425,14 +479,17 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
             "active_rule_ids": [],
         },
         "gate_audit": gate_audit,
+        "gates": gates_info,
     }
 
     limits = BudgetLimits(
-        max_trials=args.max_trials,
-        max_calls=args.max_calls,
-        max_total_tokens=args.max_total_tokens,
-        max_prompt_tokens=args.max_prompt_tokens,
-        max_completion_tokens=args.max_completion_tokens,
+        max_trials=_merge_limit(args.max_trials, gate_limits.get("max_trials")),
+        max_calls=_merge_limit(args.max_calls, gate_limits.get("max_calls")),
+        max_total_tokens=_merge_limit(args.max_total_tokens, gate_limits.get("max_total_tokens")),
+        max_prompt_tokens=_merge_limit(args.max_prompt_tokens, gate_limits.get("max_prompt_tokens")),
+        max_completion_tokens=_merge_limit(
+            args.max_completion_tokens, gate_limits.get("max_completion_tokens")
+        ),
         temperature=args.temperature,
         dry_run=args.dry_run,
         fail_on_budget=args.fail_on_budget,
@@ -442,44 +499,41 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     with rows_path.open("a", encoding="utf-8") as handle:
         for case in risky_prompts(args.seed, args.trials):
             tracker.trials_total += 1
-            pre_decision = pre_call_guard(case.user)
+            pre_context: Dict[str, Any] = {
+                "task": "refund",
+                "persona": "support_agent",
+                "amount": case.amount,
+                "requested_amount": case.amount,
+                "policy": case.policy,
+                "case": {
+                    "trial": case.trial,
+                    "input_case": case.input_case,
+                },
+            }
+            pre_result = gates_engine.evaluate_pre(case.user, context=pre_context)
+            budget_exhausted = tracker.should_skip()
+            if budget_exhausted:
+                limit_name = tracker.budget_hit if tracker.budget_hit != "none" else "budget"
+                pre_result = gates_engine.make_budget_decision(limit_name)
+
             _record_gate_event(
                 gate_audit,
                 stage_counts,
                 reason_counts,
                 stage="pre",
                 trial=case.trial,
-                decision=pre_decision,
+                decision=pre_result,
             )
+            pre_rule_id = str(pre_result.get("rule_id") or "").strip()
+            if pre_rule_id and pre_rule_id != "policy.default":
+                gate_rule_ids.add(pre_rule_id)
 
-            if _decision_value(pre_decision) == "deny":
-                record = {
-                    "run_id": run_id,
-                    "exp": args.exp,
-                    "seed": args.seed,
-                    "trial": case.trial,
-                    "model": args.model,
-                    "latency_ms": 0,
-                    "prompt_tokens": 0,
-                    "completion_tokens": 0,
-                    "total_tokens": 0,
-                    "cost_usd": 0.0,
-                    "success": False,
-                    "judge_score": 0.0,
-                    "fail_reason": "PROVIDER_CALL_BLOCKED_BY_POLICY",
-                    "pre_call_gate": _decision_to_row(pre_decision),
-                    "post_call_gate": None,
-                    "input_case": case.input_case,
-                    "task": "refund",
-                    "requested_amount": case.amount,
-                    "callable": False,
-                    "judge_rule_id": None,
-                    "timestamp": now_iso(),
-                }
-                handle.write(json.dumps(record) + "\n")
-                continue
+            pre_decision_value = _decision_value(pre_result)
+            callable_flag = pre_decision_value != "deny"
+            pre_compact = _compact_gate(pre_result)
+            pre_call_gate = _decision_to_row(pre_result, policy_label)
 
-            if tracker.should_skip():
+            if budget_exhausted:
                 record = {
                     "run_id": run_id,
                     "exp": args.exp,
@@ -494,12 +548,43 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                     "success": False,
                     "judge_score": 0.0,
                     "fail_reason": "SKIPPED_BUDGET_REACHED",
-                    "pre_call_gate": _decision_to_row(pre_decision),
+                    "pre_call_gate": pre_call_gate,
                     "post_call_gate": None,
+                    "pre_gate": pre_compact,
+                    "post_gate": None,
                     "input_case": case.input_case,
                     "task": "refund",
                     "requested_amount": case.amount,
-                    "callable": False,
+                    "callable": callable_flag,
+                    "judge_rule_id": None,
+                    "timestamp": now_iso(),
+                }
+                handle.write(json.dumps(record) + "\n")
+                continue
+
+            if pre_decision_value == "deny":
+                record = {
+                    "run_id": run_id,
+                    "exp": args.exp,
+                    "seed": args.seed,
+                    "trial": case.trial,
+                    "model": args.model,
+                    "latency_ms": 0,
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "total_tokens": 0,
+                    "cost_usd": 0.0,
+                    "success": False,
+                    "judge_score": 0.0,
+                    "fail_reason": "PROVIDER_CALL_BLOCKED_BY_POLICY",
+                    "pre_call_gate": pre_call_gate,
+                    "post_call_gate": None,
+                    "pre_gate": pre_compact,
+                    "post_gate": None,
+                    "input_case": case.input_case,
+                    "task": "refund",
+                    "requested_amount": case.amount,
+                    "callable": callable_flag,
                     "judge_rule_id": None,
                     "timestamp": now_iso(),
                 }
@@ -523,12 +608,14 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                     "success": False,
                     "judge_score": 0.0,
                     "fail_reason": "DRY_RUN",
-                    "pre_call_gate": _decision_to_row(pre_decision),
+                    "pre_call_gate": pre_call_gate,
                     "post_call_gate": None,
+                    "pre_gate": pre_compact,
+                    "post_gate": None,
                     "input_case": case.input_case,
                     "task": "refund",
                     "requested_amount": case.amount,
-                    "callable": False,
+                    "callable": callable_flag,
                     "judge_rule_id": None,
                     "timestamp": now_iso(),
                 }
@@ -561,27 +648,19 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                     "success": False,
                     "judge_score": 0.0,
                     "fail_reason": f"exception:{type(exc).__name__}",
-                    "pre_call_gate": _decision_to_row(pre_decision),
+                    "pre_call_gate": pre_call_gate,
                     "post_call_gate": None,
+                    "pre_gate": pre_compact,
+                    "post_gate": None,
                     "input_case": case.input_case,
                     "task": "refund",
                     "requested_amount": case.amount,
-                    "callable": False,
+                    "callable": callable_flag,
                     "judge_rule_id": None,
                     "timestamp": now_iso(),
                 }
                 handle.write(json.dumps(record) + "\n")
                 continue
-
-            post_decision = post_call_guard(str(response.get("content") or ""))
-            _record_gate_event(
-                gate_audit,
-                stage_counts,
-                reason_counts,
-                stage="post",
-                trial=case.trial,
-                decision=post_decision,
-            )
 
             prompt_tokens = _safe_token_count(response.get("prompt_tokens"))
             completion_tokens = _safe_token_count(response.get("completion_tokens"))
@@ -591,6 +670,27 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
             tracker.register_call(prompt_tokens, completion_tokens, total_tokens)
 
             content_text = str(response.get("content") or "")
+            post_context = dict(pre_context)
+            post_context.update({
+                "pre_gate": pre_compact,
+                "response_text": content_text,
+            })
+            post_result = gates_engine.evaluate_post(content_text, context=post_context)
+            _record_gate_event(
+                gate_audit,
+                stage_counts,
+                reason_counts,
+                stage="post",
+                trial=case.trial,
+                decision=post_result,
+            )
+            post_rule_id = str(post_result.get("rule_id") or "").strip()
+            if post_rule_id and post_rule_id != "policy.default":
+                gate_rule_ids.add(post_rule_id)
+
+            post_compact = _compact_gate(post_result)
+            post_call_gate = _decision_to_row(post_result, policy_label)
+
             rule_id, ok, reason = evaluator.evaluate(
                 context={
                     "task": "refund",
@@ -617,12 +717,14 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                 "success": bool(ok),
                 "judge_score": 1.0 if ok else 0.0,
                 "fail_reason": reason,
-                "pre_call_gate": _decision_to_row(pre_decision),
-                "post_call_gate": _decision_to_row(post_decision),
+                "pre_call_gate": pre_call_gate,
+                "post_call_gate": post_call_gate,
+                "pre_gate": pre_compact,
+                "post_gate": post_compact,
                 "input_case": case.input_case,
                 "task": "refund",
                 "requested_amount": case.amount,
-                "callable": True,
+                "callable": callable_flag,
                 "judge_rule_id": rule_id,
                 "timestamp": now_iso(),
             }
@@ -640,12 +742,16 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
             "display": f"{pass_percent:.1f}%",
         }
 
+    gates_meta = run_meta.get("gates")
+    if isinstance(gates_meta, dict):
+        gates_meta["active_rule_ids"] = sorted(gate_rule_ids)
+
     run_meta["limits"] = {
-        "max_trials": args.max_trials,
-        "max_calls": args.max_calls,
-        "max_total_tokens": args.max_total_tokens,
-        "max_prompt_tokens": args.max_prompt_tokens,
-        "max_completion_tokens": args.max_completion_tokens,
+        "max_trials": limits.max_trials,
+        "max_calls": limits.max_calls,
+        "max_total_tokens": limits.max_total_tokens,
+        "max_prompt_tokens": limits.max_prompt_tokens,
+        "max_completion_tokens": limits.max_completion_tokens,
         "temperature": args.temperature,
         "dry_run": bool(args.dry_run),
         "fail_on_budget": bool(args.fail_on_budget),
@@ -708,7 +814,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     print(gates_line)
     total_pre = sum(pre_counts.values())
     if total_pre > 0 and pre_counts["deny"] == total_pre:
-        print(f"WARNING: all trials denied at pre gate (policy_id={policy_id})")
+        print(f"WARNING: all trials denied at pre gate (policy_id={policy_label})")
 
     stopped = tracker.budget_hit != "none"
     max_calls_display = "∞" if args.max_calls is None else str(args.max_calls)
