@@ -63,7 +63,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install
-        run: make install
+        run: pip install -r requirements-ci.txt
 
       - name: Set RUN_ID
         run: echo "RUN_ID=$(date -u +'%Y-%m-%dT%H-%M-%SZ')" >> "$GITHUB_ENV"
