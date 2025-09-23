@@ -34,12 +34,10 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements-ci.txt
 
-      - name: Show Python and deps
-        run: |
-          python -c "import sys; print('PY', sys.version)"
-          python -c "import numpy, pandas, matplotlib; print('NP', numpy.__version__, 'PD', pandas.__version__, 'MP', matplotlib.__version__)"
-
       - name: Pre-flight checks (imports only)
+        run: python tools/ci_preflight.py
+
+      - name: Show Python and dep versions
         run: |
           PYTHON_SCRIPT=$'import importlib, sys\nmissing = []\nfor mod in ("numpy","pandas","matplotlib"):\n    try:\n        importlib.import_module(mod)\n    except Exception as e:\n        missing.append((mod, repr(e)))\nif missing:\n    print("VERIFICATION: FAIL")\n    for mod, err in missing:\n        print(f"- Missing Python module \'{mod}\'. Install via requirements-ci.txt. (import error: {err})")\n    sys.exit(1)\nprint("VERIFICATION: OK")'
           python -c "$PYTHON_SCRIPT"
