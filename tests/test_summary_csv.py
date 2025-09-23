@@ -22,6 +22,8 @@ APPENDED_COLUMNS = [
     "total_trials",
     "pre_denied",
     "called_trials",
+    "callable",
+    "success",
     "pass_rate",
     "p50_ms",
     "p95_ms",
@@ -35,6 +37,7 @@ APPENDED_COLUMNS = [
     "tokens_total_sum",
     "stopped_early",
     "budget_hit",
+    "judge_rule_id",
 ]
 
 

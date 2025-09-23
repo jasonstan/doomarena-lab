@@ -16,6 +16,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 if __package__ in (None, ""):
     sys.path.append(str(Path(__file__).resolve().parent.parent))
 from scripts._lib import ensure_dir  # future: read_summary, weighted_asr_by_exp
+from policies.evaluator import Evaluator, EvaluatorConfigError
 
 SUMMARY_COLUMNS: Tuple[str, ...] = (
     "exp_id",
@@ -35,6 +36,8 @@ SUMMARY_COLUMNS: Tuple[str, ...] = (
     "total_trials",
     "pre_denied",
     "called_trials",
+    "callable",
+    "success",
     "pass_rate",
     "p50_ms",
     "p95_ms",
@@ -48,6 +51,7 @@ SUMMARY_COLUMNS: Tuple[str, ...] = (
     "tokens_total_sum",
     "stopped_early",
     "budget_hit",
+    "judge_rule_id",
 )
 
 
@@ -121,7 +125,7 @@ class RunAggregation:
     base_dir: Path
     total_trials: int = 0
     pre_denied: int = 0
-    called_trials: int = 0
+    callable_trials: int = 0
     passed_trials: int = 0
     post_warn: int = 0
     post_deny: int = 0
@@ -151,6 +155,10 @@ class RunAggregation:
     usage_tokens_total_sum: Optional[int] = None
     budget_stopped_early: Optional[bool] = None
     budget_hit_value: Optional[str] = None
+    rule_ids: set[str] = field(default_factory=set)
+    evaluator_version: Optional[str] = None
+    evaluator_config_path: Optional[str] = None
+    evaluator_rules_total: Optional[int] = None
 
     def update_from_rows(
         self,
@@ -167,6 +175,23 @@ class RunAggregation:
             policy = _stringify(run_meta.get("policy_id")).strip()
             if policy:
                 self.policy_ids.add(policy)
+            evaluator_meta = run_meta.get("evaluator")
+            if isinstance(evaluator_meta, dict):
+                version_text = _stringify(evaluator_meta.get("version")).strip()
+                if version_text:
+                    self.evaluator_version = version_text
+                config_text = _stringify(evaluator_meta.get("config_path")).strip()
+                if config_text:
+                    self.evaluator_config_path = config_text
+                rules_total = _parse_optional_int(evaluator_meta.get("rules_total"))
+                if rules_total is not None:
+                    self.evaluator_rules_total = rules_total
+                active_rules = evaluator_meta.get("active_rule_ids")
+                if isinstance(active_rules, (list, tuple)):
+                    for rule_id in active_rules:
+                        rule_text = _stringify(rule_id).strip()
+                        if rule_text:
+                            self.rule_ids.add(rule_text)
             usage_meta = run_meta.get("usage")
             if isinstance(usage_meta, dict):
                 calls_attempted = _parse_optional_int(usage_meta.get("calls_attempted"))
@@ -205,15 +230,27 @@ class RunAggregation:
             fail_reason_key = fail_reason_value.upper()
             skipped_budget = fail_reason_key == "SKIPPED_BUDGET_REACHED"
             is_dry_run = fail_reason_key == "DRY_RUN"
+            judge_rule = _stringify(entry.get("judge_rule_id")).strip()
+            if judge_rule:
+                self.rule_ids.add(judge_rule)
             if not attempted:
                 self.pre_denied += 1
             else:
                 self.calls_attempted_count += 1
-            called = attempted and not skipped_budget and not is_dry_run
-            if called:
-                self.called_trials += 1
+            callable_opt = _parse_optional_bool(entry.get("callable"))
+            if callable_opt is None:
+                callable_flag = attempted and not skipped_budget and not is_dry_run
+            else:
+                callable_flag = callable_opt
+            if callable_flag:
+                self.callable_trials += 1
                 self.calls_made_count += 1
-                if bool(entry.get("success")):
+                success_opt = _parse_optional_bool(entry.get("success"))
+                if success_opt is None:
+                    success_flag = bool(entry.get("success"))
+                else:
+                    success_flag = success_opt
+                if success_flag:
                     self.passed_trials += 1
                 latency_value = _parse_optional_float(entry.get("latency_ms"))
                 if latency_value is not None:
@@ -270,7 +307,7 @@ class RunAggregation:
         )
 
     def pass_rate_percent(self) -> float:
-        denominator = max(self.called_trials, 1)
+        denominator = max(self.callable_trials, 1)
         return (self.passed_trials / float(denominator)) * 100.0
 
     def pass_rate_display(self) -> str:
@@ -311,7 +348,9 @@ class RunAggregation:
         return {
             "total_trials": str(self.total_trials),
             "pre_denied": str(self.pre_denied),
-            "called_trials": str(self.called_trials),
+            "called_trials": str(self.callable_trials),
+            "callable": str(self.callable_trials),
+            "success": str(self.passed_trials),
             "pass_rate": self.pass_rate_display(),
             "p50_ms": str(p50) if p50 is not None else "",
             "p95_ms": str(p95) if p95 is not None else "",
@@ -325,6 +364,7 @@ class RunAggregation:
             "tokens_total_sum": str(tokens_total_sum),
             "stopped_early": stopped_text,
             "budget_hit": budget_hit,
+            "judge_rule_id": ";".join(sorted(self.rule_ids)),
         }
 
     def to_dict(self) -> Dict[str, Any]:
@@ -351,7 +391,8 @@ class RunAggregation:
         return {
             "total_trials": self.total_trials,
             "pre_denied": self.pre_denied,
-            "called_trials": self.called_trials,
+            "called_trials": self.callable_trials,
+            "callable_trials": self.callable_trials,
             "passed_trials": self.passed_trials,
             "pass_rate": {
                 "percent": self.pass_rate_percent(),
@@ -389,6 +430,18 @@ class RunAggregation:
             "budget": {
                 "stopped_early": bool(stopped_value),
                 "budget_hit": budget_hit,
+            },
+            "evaluator": {
+                "version": self.evaluator_version,
+                "config_path": self.evaluator_config_path,
+                "active_rule_ids": sorted(self.rule_ids),
+                "rules_total": self.evaluator_rules_total,
+                "callable_trials": self.callable_trials,
+                "successes": self.passed_trials,
+                "pass_rate": {
+                    "percent": self.pass_rate_percent(),
+                    "display": self.pass_rate_display(),
+                },
             },
         }
 
@@ -1176,6 +1229,11 @@ def parse_args() -> argparse.Namespace:
         default=emit_default,
         help="Whether to print RUN status summary lines (default: always; set to never to suppress)",
     )
+    parser.add_argument(
+        "--evaluator",
+        default=None,
+        help="Path to evaluator rules file (default: repo policies/evaluator.yaml)",
+    )
     return parser.parse_args()
 
 
@@ -1191,7 +1249,7 @@ def _status_summary(aggregation: RunAggregation) -> tuple[str, str]:
         message = "RUN FAIL: no rows.jsonl produced; see earlier error."
         return "fail", message
 
-    called = aggregation.called_trials
+    called = aggregation.callable_trials
     total = aggregation.total_trials
     if total > 0 and called == 0:
         policy = "unknown"
@@ -1226,6 +1284,27 @@ def main() -> int:
     base_dir.mkdir(parents=True, exist_ok=True)
     summary_path = base_dir / "summary.csv"
 
+    if args.evaluator:
+        evaluator_path = Path(args.evaluator).expanduser()
+        if not evaluator_path.is_absolute():
+            evaluator_path = (Path.cwd() / evaluator_path).resolve()
+        else:
+            evaluator_path = evaluator_path.resolve()
+    else:
+        evaluator_path = (Path(__file__).resolve().parents[1] / "policies" / "evaluator.yaml").resolve()
+    try:
+        evaluator = Evaluator.from_path(evaluator_path)
+    except FileNotFoundError as exc:
+        print(
+            f"ERROR: {exc}"
+            "\nHint: provide --evaluator to point at a valid evaluator rules file.",
+            file=sys.stderr,
+        )
+        return 2
+    except EvaluatorConfigError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+
     jsonl_files = sorted(base_dir.rglob("*.jsonl"))
     empty_reason: Optional[str] = None
     if not jsonl_files:
@@ -1247,6 +1326,9 @@ def main() -> int:
 
     new_rows: List[Dict[str, str]] = []
     run_metrics = RunAggregation(base_dir=base_dir)
+    run_metrics.evaluator_version = evaluator.version
+    run_metrics.evaluator_config_path = str(evaluator_path)
+    run_metrics.evaluator_rules_total = len(evaluator.rules)
 
     for path in jsonl_files:
         try:

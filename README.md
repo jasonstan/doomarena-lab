@@ -113,6 +113,12 @@ The GitHub Action exposes the same inputs (`max_trails`/`max_trials`, `max_total
 - **Pre/post gates:** currently simple (amount thresholds + approval mention).
 - **Near-term:** declarative policy rules, structured `GateDecision`, reason codes, and a visible CI summary.
 
+### Evaluator rules
+- Runtime success criteria live in `policies/evaluator.yaml` (versioned list of `id`/`applies_if`/`success_if`).
+- Experiments and the aggregator load the rules at startup (`--evaluator <path>` overrides the default file).
+- Each trial records `judge_rule_id`, `callable`, and `success`; run metadata tracks the evaluator version and active rules.
+- If the rules file is missing or invalid the workflow fails early with a message pointing to `--evaluator`.
+
 ## Troubleshooting
 - **Empty HTML/CSV/SVG:** Ensure `results/<RUN_ID>/tau_risky_real/rows.jsonl` exists and has ≥1 line.
 - **All trials denied (pre-gate):** Report will show “0 evaluated calls”; review policy thresholds/policy file.

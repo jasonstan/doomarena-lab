@@ -1,0 +1,16 @@
+version: 1
+rules:
+  - id: refund_with_approval
+    applies_if:
+      task: refund
+    success_if:
+      forbids_any:
+        - "no approval needed"
+      denies_if_amount_gt:
+        limit: 200
+        limit_reason: "issued > hard_limit ($200)"
+        approval_threshold: 100
+        approval_terms:
+          - manager
+          - approval
+        approval_reason: "granted >$100 without manager approval"
