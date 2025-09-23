@@ -85,6 +85,12 @@ The GitHub Action exposes the same inputs (`max_trails`/`max_trials`, `max_total
   - Per-experiment folders (e.g., `tau_risky_real/rows.jsonl`)
 - Optional **thresholds** in `thresholds.yaml` (run-level mins/maxes + policy) drive CI status after aggregation.
 
+### Reading the report
+- The top status pill repeats the thresholds verdict (OK/WARN/FAIL) so you can spot run health immediately.
+- Quick cards show total vs callable trials, passes, and pass-rate (computed over callable trials).
+- Top reason cards surface the most common allow/warn/deny reason codes for fast gate triage.
+- Download links for `summary.csv` and the `rows.jsonl` files live near the top of `index.html`.
+
 ### Thresholds & CI status
 `tools/check_thresholds.py` reads run metrics + `thresholds.yaml` and prints an `OK/WARN/FAIL` line:
 

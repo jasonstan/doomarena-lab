@@ -91,6 +91,11 @@ def _default_report_payload() -> dict[str, object]:
         },
         "top_reason": "-",
         "reason_counts": {},
+        "reason_counts_by_decision": {
+            "allow": {},
+            "warn": {},
+            "deny": {},
+        },
         "rows_paths": [],
         "run_json_paths": [],
         "policy_ids": [],
@@ -163,6 +168,71 @@ def _format_cost(report: dict[str, object]) -> str:
     return f"${cost_value:.2f}"
 
 
+def _pass_rate_display(report: dict[str, object]) -> str:
+    pass_rate = report.get("pass_rate")
+    if isinstance(pass_rate, dict):
+        display = pass_rate.get("display")
+        if display:
+            return str(display)
+    return "0.0%"
+
+
+def build_status_banner(report: dict[str, object]) -> str:
+    thresholds = report.get("thresholds")
+    if isinstance(thresholds, dict):
+        status = str(thresholds.get("status") or "").upper()
+        summary = str(thresholds.get("summary") or "").strip()
+        policy = str(thresholds.get("policy") or "").strip()
+        strict_flag = thresholds.get("strict")
+        css_class = {
+            "OK": "status-ok",
+            "WARN": "status-warn",
+            "FAIL": "status-fail",
+        }.get(status, "status-neutral")
+        if not summary:
+            summary = f"THRESHOLDS: {status or 'UNKNOWN'}"
+        title_bits: list[str] = []
+        if policy:
+            title_bits.append(f"policy={policy}")
+        if isinstance(strict_flag, bool):
+            title_bits.append(f"strict={'1' if strict_flag else '0'}")
+        title_attr = f" title=\"{html.escape('; '.join(title_bits))}\"" if title_bits else ""
+        return (
+            f"<div class='status-banner {css_class}'{title_attr}>"
+            f"{html.escape(summary)}"
+            "</div>"
+        )
+    return "<div class='status-banner status-neutral'>No thresholds evaluated.</div>"
+
+
+def build_quick_panels(report: dict[str, object]) -> str:
+    total = _as_int(report.get("total_trials"), 0)
+    callable_trials = _as_int(report.get("callable_trials"), _as_int(report.get("called_trials"), 0))
+    pre_denied = _as_int(report.get("pre_denied"), 0)
+    passed = _as_int(report.get("passed_trials"), 0)
+    pass_rate_display = _pass_rate_display(report)
+    callable_context = f"Callable trials: {callable_trials}"
+    if total and pre_denied:
+        callable_context += f" · Pre-denied: {pre_denied}"
+    pass_context = f"Pass rate (callable): {pass_rate_display}"
+    if callable_trials:
+        pass_context += f" · {passed}/{callable_trials}"
+    return f"""
+<div class='quick-panels'>
+  <div class='quick-card'>
+    <div class='quick-title'>Trials</div>
+    <div class='quick-value'>{total}</div>
+    <div class='quick-context'>{html.escape(callable_context)}</div>
+  </div>
+  <div class='quick-card'>
+    <div class='quick-title'>Pass outcomes</div>
+    <div class='quick-value'>{passed}</div>
+    <div class='quick-context'>{html.escape(pass_context)}</div>
+  </div>
+</div>
+"""
+
+
 def _format_latency(report: dict[str, object]) -> str:
     latency = report.get("latency_ms")
     if not isinstance(latency, dict):
@@ -180,12 +250,7 @@ def build_overview(report: dict[str, object]) -> str:
     passed = _as_int(report.get("passed_trials"), 0)
     called = _as_int(report.get("called_trials"), 0)
     total = _as_int(report.get("total_trials"), 0)
-    pass_rate = report.get("pass_rate")
-    pass_rate_display = "0.0%"
-    if isinstance(pass_rate, dict):
-        display = pass_rate.get("display")
-        if display:
-            pass_rate_display = str(display)
+    pass_rate_display = _pass_rate_display(report)
     usage = report.get("usage") if isinstance(report.get("usage"), dict) else {}
     budget = report.get("budget") if isinstance(report.get("budget"), dict) else {}
     tokens_total_sum = _as_int(usage.get("tokens_total_sum") if isinstance(usage, dict) else 0,
@@ -424,21 +489,91 @@ def build_banners(report: dict[str, object], policy_ids: list[object]) -> str:
 
 
 def build_reason_table(report: dict[str, object]) -> str:
-    reasons = report.get("reason_counts")
-    if not isinstance(reasons, dict) or not reasons:
-        return "<p><em>No gate reason codes recorded.</em></p>"
-    ordered = sorted(
-        ((str(reason), _as_int(count, 0)) for reason, count in reasons.items()),
-        key=lambda item: (-item[1], item[0]),
-    )
-    rows_html = [
-        f"<tr><td>{html.escape(reason)}</td><td>{count}</td></tr>"
-        for reason, count in ordered[:3]
+    breakdown_raw = report.get("reason_counts_by_decision")
+    breakdown: dict[str, dict[str, int]] = {}
+    if isinstance(breakdown_raw, dict):
+        for decision, mapping in breakdown_raw.items():
+            if not isinstance(mapping, dict):
+                continue
+            cleaned: dict[str, int] = {}
+            for reason, count in mapping.items():
+                text = str(reason)
+                cleaned[text] = _as_int(count, 0)
+            breakdown[decision] = cleaned
+
+    if not any(breakdown.get(key) for key in ("allow", "warn", "deny")):
+        reasons = report.get("reason_counts")
+        if isinstance(reasons, dict) and reasons:
+            breakdown["deny"] = {
+                str(reason): _as_int(count, 0) for reason, count in reasons.items()
+            }
+        else:
+            return "<p><em>No gate reason codes recorded.</em></p>"
+
+    display_order = [
+        ("deny", "Deny", "reason-card-deny"),
+        ("warn", "Warn", "reason-card-warn"),
+        ("allow", "Allow", "reason-card-allow"),
     ]
+
+    cards: list[str] = []
+    for key, label, css_class in display_order:
+        bucket = breakdown.get(key, {}) or {}
+        total = sum(int(value) for value in bucket.values())
+        if not bucket:
+            body = "<li><em>None recorded</em></li>"
+        else:
+            ordered = sorted(
+                ((reason, int(count)) for reason, count in bucket.items()),
+                key=lambda item: (-item[1], item[0]),
+            )
+            top_three = ordered[:3]
+            body = "".join(
+                f"<li><span class='code'>{html.escape(reason)}</span><span class='count'>{count}</span></li>"
+                for reason, count in top_three
+            )
+        cards.append(
+            "<div class='reason-card {css_class}'>".format(css_class=css_class)
+            + f"<div class='reason-title'>{label}</div>"
+            + f"<div class='reason-total'>Total: {total}</div>"
+            + f"<ul>{body}</ul>"
+            + "</div>"
+        )
+
+    return "<div class='reason-grid'>" + "".join(cards) + "</div>"
+
+
+def build_data_links(run_dir: Path, report: dict[str, object]) -> str:
+    summary_path = run_dir / "summary.csv"
+    if summary_path.exists():
+        summary_html = "Summary: <a href='summary.csv' download>summary.csv</a>"
+    else:
+        summary_html = "<span class='missing'>summary.csv (missing)</span>"
+
+    rows_paths = report.get("rows_paths")
+    row_links: list[str] = []
+    if isinstance(rows_paths, list) and rows_paths:
+        for rel_path in rows_paths:
+            rel_text = str(rel_path)
+            if not rel_text:
+                continue
+            escaped = html.escape(rel_text)
+            row_links.append(f"<a href='{escaped}' download>Download {escaped}</a>")
+    else:
+        default_rows = run_dir / "rows.jsonl"
+        if default_rows.exists():
+            row_links.append("<a href='rows.jsonl' download>Download rows.jsonl</a>")
+
+    if not row_links:
+        rows_html = "<span class='missing'>rows.jsonl (missing)</span>"
+    else:
+        rows_html = "Rows: " + " · ".join(row_links)
+
     return (
-        "<table class='reason-table'><thead><tr><th>Reason code</th><th>Count</th></tr></thead><tbody>"
-        + "".join(rows_html)
-        + "</tbody></table>"
+        "<div class='data-links'>"
+        + f"<span>{summary_html}</span>"
+        + f"<span>{rows_html}</span>"
+        + "</div>"
     )
 
 
@@ -488,9 +623,19 @@ def render_template(context: dict[str, str]) -> str:
       h1{margin:0 0 16px;font-size:26px;}
       h2{margin:32px 0 12px;font-size:20px;}
       .meta{color:#52606d;font-size:13px;margin:4px 0 16px;}
+      .status-banner{display:inline-flex;align-items:center;padding:10px 18px;border-radius:999px;font-weight:600;font-size:14px;margin:0 0 16px;}
+      .status-ok{background:#dcfce7;color:#166534;}
+      .status-warn{background:#fef3c7;color:#92400e;}
+      .status-fail{background:#fee2e2;color:#b91c1c;}
+      .status-neutral{background:#e5e7eb;color:#374151;}
       .banner{padding:12px 16px;border-radius:6px;margin-bottom:16px;font-size:14px;}
       .banner-error{background:#fee2e2;color:#b91c1c;}
       .banner-warn{background:#fef3c7;color:#92400e;}
+      .quick-panels{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:16px;}
+      .quick-card{background:#ffffff;padding:12px 16px;border-radius:10px;box-shadow:0 1px 2px rgba(15,23,42,0.08);flex:1 1 220px;min-width:220px;}
+      .quick-title{font-size:12px;text-transform:uppercase;letter-spacing:0.08em;color:#52606d;}
+      .quick-value{font-size:24px;font-weight:600;color:#1f2933;margin-top:4px;}
+      .quick-context{font-size:14px;color:#52606d;margin-top:6px;}
       .overview-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;}
       .overview-header{display:flex;align-items:center;gap:10px;margin-bottom:8px;}
       .overview-header h2{margin:0;}
@@ -508,6 +653,20 @@ def render_template(context: dict[str, str]) -> str:
       .badge-warn{background:#fef3c7;color:#92400e;}
       .badge-fail{background:#fee2e2;color:#b91c1c;}
       .overview-budget{margin-top:10px;font-size:14px;color:#52606d;}
+      .reason-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin:16px 0;}
+      .reason-card{background:#ffffff;padding:14px 16px;border-radius:10px;box-shadow:0 1px 2px rgba(15,23,42,0.08);border-top:3px solid transparent;}
+      .reason-card-deny{border-color:#b91c1c;}
+      .reason-card-warn{border-color:#d97706;}
+      .reason-card-allow{border-color:#166534;}
+      .reason-title{font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#52606d;}
+      .reason-total{font-size:13px;color:#52606d;margin-top:4px;}
+      .reason-card ul{list-style:none;margin:10px 0 0;padding:0;}
+      .reason-card li{display:flex;justify-content:space-between;font-size:14px;padding:4px 0;border-bottom:1px solid #e5e7eb;}
+      .reason-card li:last-child{border-bottom:none;}
+      .reason-card .code{font-weight:600;color:#1f2933;}
+      .reason-card .count{color:#52606d;}
+      .data-links{display:flex;flex-wrap:wrap;gap:16px;margin:0 0 16px;font-size:14px;}
+      .data-links span{display:inline-flex;align-items:center;gap:8px;}
       table{border-collapse:collapse;width:100%;max-width:980px;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 2px rgba(15,23,42,0.08);}
       th,td{border:1px solid #e5e7eb;padding:8px 10px;font-size:14px;text-align:left;}
       th{background:#f3f4f6;font-weight:600;}
@@ -521,7 +680,12 @@ def render_template(context: dict[str, str]) -> str:
   <body>
     <h1>$HEADER_TITLE</h1>
     $META
+    $STATUS_BANNER
+    $QUICK_PANELS
+    $DATA_LINKS
     $BANNERS
+    <h2>Top gate reasons</h2>
+    $TOP_REASONS
     <div class='overview-header'>
       <h2>Overview</h2>
       $THRESHOLD_BADGE
@@ -534,8 +698,6 @@ def render_template(context: dict[str, str]) -> str:
     $SUMMARY_CHART
     <h2>Summary table</h2>
     $SUMMARY_TABLE
-    <h2>Top gate reasons</h2>
-    $TOP_REASONS
     <h2>Artifacts</h2>
     $ARTIFACT_LINKS
   </body>
@@ -580,6 +742,9 @@ def write_report(run_dir: Path) -> None:
         "TITLE": f"DoomArena-Lab Run Report — {run_id}" if run_id else "DoomArena-Lab Run Report",
         "HEADER_TITLE": "DoomArena-Lab Run Report",
         "META": meta_html,
+        "STATUS_BANNER": build_status_banner(report),
+        "QUICK_PANELS": build_quick_panels(report),
+        "DATA_LINKS": build_data_links(run_dir, report),
         "BANNERS": build_banners(report, policy_ids),
         "THRESHOLD_BADGE": build_threshold_badge(report),
         "OVERVIEW_BADGE": build_overview_badge(report),

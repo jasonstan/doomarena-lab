@@ -140,6 +140,9 @@ class RunAggregation:
         default_factory=lambda: {"allow": 0, "warn": 0, "deny": 0}
     )
     reason_counts: Counter[str] = field(default_factory=Counter)
+    reason_counts_by_decision: Dict[str, Counter[str]] = field(
+        default_factory=lambda: {key: Counter() for key in ("allow", "warn", "deny")}
+    )
     rows_paths: List[str] = field(default_factory=list)
     run_json_paths: List[str] = field(default_factory=list)
     policy_ids: set[str] = field(default_factory=set)
@@ -223,8 +226,7 @@ class RunAggregation:
             if pre_policy:
                 self.policy_ids.add(pre_policy)
             _increment_gate(self.pre_counts, pre_decision)
-            if pre_reason:
-                self.reason_counts[pre_reason] += 1
+            self._record_reason(pre_decision, pre_reason)
             attempted = pre_decision != "deny"
             fail_reason_value = _stringify(entry.get("fail_reason")).strip()
             fail_reason_key = fail_reason_value.upper()
@@ -274,8 +276,7 @@ class RunAggregation:
                 if post_policy:
                     self.policy_ids.add(post_policy)
                 _increment_gate(self.post_counts, post_decision)
-                if post_reason:
-                    self.reason_counts[post_reason] += 1
+                self._record_reason(post_decision, post_reason)
                 if post_decision == "warn":
                     self.post_warn += 1
                 elif post_decision == "deny":
@@ -286,8 +287,14 @@ class RunAggregation:
                 )
                 if post_policy:
                     self.policy_ids.add(post_policy)
-                if post_reason:
-                    self.reason_counts[post_reason] += 1
+                self._record_reason(post_decision, post_reason)
+
+    def _record_reason(self, decision: str, reason: Optional[str]) -> None:
+        if not reason:
+            return
+        self.reason_counts[reason] += 1
+        bucket = self.reason_counts_by_decision.setdefault(decision, Counter())
+        bucket[reason] += 1
 
     def register_run_json_path(self, path: Path) -> None:
         if not path.exists():
@@ -413,6 +420,10 @@ class RunAggregation:
             "top_reason": self.top_reason(),
             "reason_counts": {
                 reason: int(count) for reason, count in self.reason_counts.items()
+            },
+            "reason_counts_by_decision": {
+                key: {reason: int(count) for reason, count in bucket.items()}
+                for key, bucket in self.reason_counts_by_decision.items()
             },
             "rows_paths": list(self.rows_paths),
             "run_json_paths": list(self.run_json_paths),
