@@ -34,28 +34,16 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements-ci.txt
 
-      - name: Show Python and deps
-        run: |
-          python -c "import sys; print('PY', sys.version)"
-          python -c "import numpy, pandas, matplotlib; print('NP', numpy.__version__, 'PD', pandas.__version__, 'MP', matplotlib.__version__)"
-
       - name: Pre-flight checks (imports only)
+        run: python tools/ci_preflight.py
+
+      - name: Show Python and dep versions
         run: |
           python - <<'PY'
-          import importlib, sys
-          missing = []
-          for mod in ("numpy","pandas","matplotlib"):
-              try:
-                  importlib.import_module(mod)
-              except Exception as e:
-                  missing.append((mod, repr(e)))
-          if missing:
-              print("VERIFICATION: FAIL")
-              for mod, err in missing:
-                  print(f"- Missing Python module '{mod}'. Install via requirements-ci.txt. (import error: {err})")
-              sys.exit(1)
-          print("VERIFICATION: OK")
-          PY
+import sys, numpy, pandas, matplotlib
+print("PY:", sys.version)
+print("NP:", numpy.__version__, "PD:", pandas.__version__, "MP:", matplotlib.__version__)
+PY
 
       - name: Set RUN_ID
         run: echo "RUN_ID=$(date -u +'%Y-%m-%dT%H-%M-%SZ')" >> $GITHUB_ENV
