@@ -41,21 +41,8 @@ jobs:
 
       - name: Pre-flight checks (imports only)
         run: |
-          python - <<'PY'
-          import importlib, sys
-          missing = []
-          for mod in ("numpy","pandas","matplotlib"):
-              try:
-                  importlib.import_module(mod)
-              except Exception as e:
-                  missing.append((mod, repr(e)))
-          if missing:
-              print("VERIFICATION: FAIL")
-              for mod, err in missing:
-                  print(f"- Missing Python module '{mod}'. Install via requirements-ci.txt. (import error: {err})")
-              sys.exit(1)
-          print("VERIFICATION: OK")
-          PY
+          PYTHON_SCRIPT=$'import importlib, sys\nmissing = []\nfor mod in ("numpy","pandas","matplotlib"):\n    try:\n        importlib.import_module(mod)\n    except Exception as e:\n        missing.append((mod, repr(e)))\nif missing:\n    print("VERIFICATION: FAIL")\n    for mod, err in missing:\n        print(f"- Missing Python module \'{mod}\'. Install via requirements-ci.txt. (import error: {err})")\n    sys.exit(1)\nprint("VERIFICATION: OK")'
+          python -c "$PYTHON_SCRIPT"
 
       - name: Set RUN_ID
         run: echo "RUN_ID=$(date -u +'%Y-%m-%dT%H-%M-%SZ')" >> $GITHUB_ENV
