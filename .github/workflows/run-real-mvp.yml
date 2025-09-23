@@ -14,49 +14,36 @@ on:
       trials:
         description: "Trials per seed"
         required: true
-        default: "3"
+        default: 3
+        type: number
       seeds:
-        description: "Comma-separated seeds"
+        description: "Seed"
         required: true
-        default: "41,42"
-      max_trails:
-        description: "Optional max-trials override (typo-safe input)"
-        required: false
-        default: ""
-      max_trials:
-        description: "Optional cap on callable trials"
-        required: false
-        default: ""
+        default: 42
+        type: number
       max_total_tokens:
-        description: "Optional run-level total token ceiling"
+        description: "Run token cap"
         required: false
-        default: ""
-      max_prompt_tokens:
-        description: "Optional prompt token ceiling"
-        required: false
-        default: ""
-      max_completion_tokens:
-        description: "Optional completion token ceiling"
-        required: false
-        default: ""
+        type: number
       max_calls:
-        description: "Optional provider call cap"
+        description: "Max provider calls"
         required: false
-        default: ""
+        type: number
       temperature:
-        description: "Optional sampling temperature override"
-        required: false
-        default: ""
-      dry_run:
-        description: "Skip provider calls (dry run)"
-        required: false
-        type: boolean
-        default: false
+        description: "Sampling temperature"
+        required: true
+        default: 0.2
+        type: number
       fail_on_budget:
-        description: "Exit non-zero when a budget limit is hit"
-        required: false
-        type: boolean
+        description: "Exit non-zero when budget hit"
+        required: true
         default: false
+        type: boolean
+      dry_run:
+        description: "Force dry-run (manual dispatch only)"
+        required: true
+        default: false
+        type: boolean
 
 # Need write to publish artifacts; keep repo read
 permissions:
@@ -144,11 +131,7 @@ jobs:
           MODEL="${{ inputs.model || 'llama-3.1-8b-instant' }}"
           TRIALS="${{ inputs.trials || '3' }}"
           SEEDS_INPUT="${{ inputs.seeds || '41,42' }}"
-          MAX_TRAILS="${{ inputs.max_trails || '' }}"
-          MAX_TRIALS="${{ inputs.max_trials || '' }}"
           MAX_TOTAL="${{ inputs.max_total_tokens || '' }}"
-          MAX_PROMPT="${{ inputs.max_prompt_tokens || '' }}"
-          MAX_COMPLETION="${{ inputs.max_completion_tokens || '' }}"
           MAX_CALLS="${{ inputs.max_calls || '' }}"
           TEMPERATURE="${{ inputs.temperature || '' }}"
           FAIL_ON_BUDGET="${{ inputs.fail_on_budget && 'true' || '' }}"
@@ -156,19 +139,8 @@ jobs:
             --model "$MODEL" \
             --trials "$TRIALS" \
             --seeds "$SEEDS_INPUT")
-          if [ -n "$MAX_TRAILS" ]; then
-            CMD+=(--max-trials "$MAX_TRAILS")
-          elif [ -n "$MAX_TRIALS" ]; then
-            CMD+=(--max-trials "$MAX_TRIALS")
-          fi
           if [ -n "$MAX_TOTAL" ]; then
             CMD+=(--max-total-tokens "$MAX_TOTAL")
-          fi
-          if [ -n "$MAX_PROMPT" ]; then
-            CMD+=(--max-prompt-tokens "$MAX_PROMPT")
-          fi
-          if [ -n "$MAX_COMPLETION" ]; then
-            CMD+=(--max-completion-tokens "$MAX_COMPLETION")
           fi
           if [ -n "$MAX_CALLS" ]; then
             CMD+=(--max-calls "$MAX_CALLS")
@@ -197,11 +169,7 @@ jobs:
           MODEL="${{ inputs.model }}"
           TRIALS="${{ inputs.trials }}"
           SEEDS_INPUT="${{ inputs.seeds }}"
-          MAX_TRAILS="${{ inputs.max_trails || '' }}"
-          MAX_TRIALS="${{ inputs.max_trials || '' }}"
           MAX_TOTAL="${{ inputs.max_total_tokens || '' }}"
-          MAX_PROMPT="${{ inputs.max_prompt_tokens || '' }}"
-          MAX_COMPLETION="${{ inputs.max_completion_tokens || '' }}"
           MAX_CALLS="${{ inputs.max_calls || '' }}"
           TEMPERATURE="${{ inputs.temperature || '' }}"
           DRY_RUN_INPUT="${{ inputs.dry_run && 'true' || '' }}"
@@ -210,19 +178,8 @@ jobs:
             --model "$MODEL" \
             --trials "$TRIALS" \
             --seeds "$SEEDS_INPUT")
-          if [ -n "$MAX_TRAILS" ]; then
-            CMD+=(--max-trials "$MAX_TRAILS")
-          elif [ -n "$MAX_TRIALS" ]; then
-            CMD+=(--max-trials "$MAX_TRIALS")
-          fi
           if [ -n "$MAX_TOTAL" ]; then
             CMD+=(--max-total-tokens "$MAX_TOTAL")
-          fi
-          if [ -n "$MAX_PROMPT" ]; then
-            CMD+=(--max-prompt-tokens "$MAX_PROMPT")
-          fi
-          if [ -n "$MAX_COMPLETION" ]; then
-            CMD+=(--max-completion-tokens "$MAX_COMPLETION")
           fi
           if [ -n "$MAX_CALLS" ]; then
             CMD+=(--max-calls "$MAX_CALLS")
