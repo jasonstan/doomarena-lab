@@ -86,7 +86,6 @@ jobs:
         run: echo "RUN_ID=$(date -u +'%Y-%m-%dT%H-%M-%SZ')" >> $GITHUB_ENV
 
       - name: Pre-flight checks (imports only)
-        shell: bash
         run: python tools/ci_preflight.py
 
       - name: Show Python and dep versions

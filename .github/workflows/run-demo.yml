@@ -58,12 +58,14 @@ jobs:
 
       - name: Refresh latest pointer
         shell: bash
-        run: make latest
+        run: |
+          make latest
 
       - name: On latest failure, print context
         if: failure()
         shell: bash
-        run: echo "ERR: latest pointer failed; check tools/latest_run.py and artifacts from previous steps."
+        run: |
+          echo "ERR: latest pointer failed; check tools/latest_run.py and artifacts from previous steps."
 
       - name: Tidy run directory (remove duplicates)
         if: ${{ always() }}
