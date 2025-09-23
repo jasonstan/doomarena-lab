@@ -3,137 +3,155 @@ DoomArena-Lab Backlog
 
 Last updated: 2025-09-23 (UTC)
 
-🎯 What “good” looks like (MVP e2e)
+🎯 MVP (what “good” looks like)
 
-A single command / CI run that goes from a tiny, declarative threat model → deterministic test cases → governed execution on a low-cost model → gate-aware report (CSV/SVG/HTML) → thresholds verdict (OK/WARN/FAIL) in CI.
+A single command / CI run that goes from a tiny, declarative threat model → deterministic cases → governed execution on a low-cost model → gate-aware report (CSV/SVG/HTML) → CI verdict (OK / WARN / FAIL).
 
-Success measures
+Why this matters (value): teams can turn a written risk/threat model into evidence in hours, not weeks—cheaply, repeatably, and with governance you can explain.
 
-Determinism: same threat_model.yaml + seed ⇒ same cases & input_case order
+📏 Success metrics (plain English)
 
-Governance evidence: callable vs. pre-denied trials; post-gate reasons; pass-rate over callable
+Determinism — Same input ⇒ same cases.
+What we measure: Given threat_model.yaml + seed, cases.jsonl and input_case order are identical.
+Why it matters: Enables apples-to-apples comparisons and reproducibility for audits.
 
-CI clarity & safety: explicit thresholds → OK/WARN/FAIL; PR runs safe (dry-run); main runs real with budgets
+Callable ratio — How much test surface actually hits the model?
+What we measure: callable_trials / total_trials (pre-deny removes non-callable).
+Why it matters: If callable is low, we’re testing policy, not model behavior (a valid outcome, but different story).
 
-Cost: default config runs in pennies
+Pass-rate over callable — Model quality where it’s allowed to act.
+What we measure: success_count / callable_trials, with success from the declarative evaluator.
+Why it matters: Primary quality signal; rolls up per slice and over time.
 
-✅ / 🟡 / ❌ — Where we are vs. the bar
-Area	Status	What we have now
-Case generation (translator)	✅	specs/threat_model.yaml → deterministic cases.jsonl with input_case, amount, persona
-REAL execution + rows	✅	Rows JSONL per trial, run.json, stable schema
-Governance gates (pre/post)	✅	Config in policies/gates.yaml; reason codes; budget caps; callable flag
-Evaluator rules	✅	policies/evaluator.yaml; judge_rule_id; success on each row
-Aggregation & report	✅	HTML with status banner, callable/pass panels, top reasons, CSV/SVG links
-Thresholds → CI status	✅	thresholds.yaml + verifier prints + sets OK/WARN/FAIL
-CI stability & safety	✅	Python 3.11, pinned deps, preflight, dry-run on PR, artifacts always upload
-DX one-command run	✅	make mvp, .env.example, make open-report
-Tests (regression)	✅	Offline tests for CLI, generation determinism, evaluator, thresholds
-Perf & scale guardrails	🟡	Works for MVP sizes; streaming/large-run safeguards are TODO
-Config validation	🟡	Basic checks; formal schema validation (YAML/JSON) is TODO
+Budget adherence — No surprises on cost/time.
+What we measure: Whether max_calls and max_total_tokens were respected; early-stop is indicated in the report.
+Why it matters: Predictable costs; safe to run in PRs and on main.
 
+CI clarity — Everyone knows “did we pass?” in one line.
+What we measure: thresholds.yaml → OK/WARN/FAIL summary printed, with exact reasons (e.g., “callable too low”, “pass-rate below 0.75”).
+Why it matters: Turns governance targets into an enforceable, visible gate.
+
+Onboarding friction — New contributor can run end-to-end in minutes.
+What we measure: Fresh clone → pip install -r requirements-ci.txt → make mvp → make open-report works on first try.
+Why it matters: More contributors, fewer support cycles.
+
+✅ / 🟡 — Where we are vs. the bar
+AreaStatusWhat we have now
+Case generation (translator)✅specs/threat_model.yaml → deterministic cases.jsonl (input_case, amount, persona).
+REAL execution + rows✅One JSONL row per trial; stable schema; run.json metadata.
+Governance gates (pre/post)✅policies/gates.yaml; structured reason codes; budget caps; callable flag.
+Evaluator rules✅policies/evaluator.yaml; judge_rule_id; success per row.
+Aggregation & reports/✅Status banner; callable/pass panels; top reasons; CSV/SVG/rows links.
+Thresholds → CI✅thresholds.yaml + verifier: prints and sets OK/WARN/FAIL.
+CI stability & safety✅Python 3.11, pinned deps, preflight, PR dry-run, artifacts.
+DX one-command run✅make mvp, .env.example, make open-report.
+Tests (regression)✅Offline tests for CLI, determinism, evaluator, thresholds.
+Perf & scale guardrails🟡MVP scale OK; streaming for very large runs TBD.
+Config validation🟡Basic checks only; formal schemas TBD.
 ✅ Recently shipped (highlights)
 
-EXP-006 (DX): make mvp, .env.example, make open-report
+EXP-006 (DX): make mvp, .env.example, make open-report.
 
-EXP-007: Threat model → deterministic cases translator
+EXP-007: Threat model → deterministic cases translator.
 
-EXP-008: Declarative evaluator (evaluator.yaml), judge_rule_id, success
+EXP-008: Declarative evaluator (evaluator.yaml), judge_rule_id, success.
 
-EXP-009: thresholds.yaml + verifier → OK/WARN/FAIL in CI
+EXP-009: thresholds.yaml + verifier → OK/WARN/FAIL in CI.
 
-EXP-010: Report polish — status banner, callable/pass panels, top reasons, data links
+EXP-010: Report polish — status banner, callable/pass panels, top reasons, data links.
 
-EXP-011: Governance gates v1 — configurable pre/post gates, reason codes, budgets, audit
+EXP-011: Governance gates v1 — configurable pre/post gates, reason codes, budget caps, audit.
 
-Audit P0/P1 fixes: CI hardening, deps pins, preflight, YAML fixes, artifact guards
+Audit & CI hardening: Python 3.11, pinned deps, preflight, YAML fixes, artifact guards.
 
-Tests: Offline regression for CLI/generation/evaluator/thresholds
+Tests: Offline regression for CLI, generation, evaluator, thresholds.
 
-🧭 On tap next (1-week plan)
+🧭 On-tap next (1-week plan)
 EXP-012 — Config validation (schemas + preflight)
 
-User story: As a contributor, when I typo a field in threat_model.yaml/gates.yaml/evaluator.yaml/thresholds.yaml, I get a crisp validation error during preflight telling me which field and why, before any run starts.
-Value: Catch bad YAML early; keep CI green; faster onboarding.
-Acceptance: JSON Schema (or pydantic) validators wired in tools/ci_preflight.py; failing schema blocks run with a clear, single message; README links to schema.
+User story: As a contributor, if I typo a field in threat_model.yaml/gates.yaml/evaluator.yaml/thresholds.yaml, I get a crisp validation error during preflight (which field, why) before any run starts.
+Value: Fewer broken runs; faster onboarding; clearer failures.
+Done when: JSON Schema (or pydantic) validators run in preflight; invalid configs block with a single human message; README links to schemas.
 
-EXP-013 — Streaming/large-run safety
+EXP-013 — Streaming / large-run safety
 
-User story: As a maintainer, I can aggregate 50k+ rows using O(1) memory streaming, and CI time stays predictable.
-Value: Prevent OOM/spikes; keep aggregation fast as runs grow.
-Acceptance: aggregate_results.py streams JSONL; no list accumulation on hot paths; test covers a large synthetic file.
+User story: As a maintainer, I can aggregate 50k+ rows with O(1) memory streaming and predictable CI time.
+Value: No OOMs; confidence we scale.
+Done when: JSONL is processed streaming; no list accumulation on hot paths; test covers a synthetic large file.
 
 EXP-014 — Budget & early-stop UX polish
 
-User story: As a user, I can set max_calls/max_total_tokens, see an Early stop badge, and the job exits with a friendly note when limits are hit.
-Value: Clear guardrails for cost & time.
-Acceptance: Consistent budget fields in run.json, HTML badge, thresholds/verifier unaffected.
+User story: As a user, I set max_calls/max_total_tokens, see an Early stop badge, and the job exits with a friendly note when limits hit.
+Value: Clear guardrails for cost/time.
+Done when: Consistent budget fields in run.json; badge in HTML; thresholds/verifier unchanged.
 
 ⏱ Near-term (2–3 weeks)
 EXP-015 — Provider matrix (same slice, multiple backends)
 
-User story: As a platform owner, I can flip inputs to run the identical slice on Groq/OpenAI/Local and compare CSVs.
-Value: Apples-to-apples comparisons without retooling.
-Acceptance: Adapters share the same row schema; selector via CLI/workflow; CI runs the cheap default on PRs.
+User story: As a platform owner, I flip a selector to run the same slice on Groq/OpenAI/Local and compare CSVs.
+Value: Apples-to-apples portability & price/perf compare.
+Done when: Adapters share row schema; selector via CLI/workflow; PR runs only the cheap default.
 
 EXP-016 — τ-Bench interop (optional adapter)
 
-User story: As a researcher, I can export rows to a minimal τ-Bench format and sanity-check against its judge/tasks offline.
-Value: Bridge to the broader ecosystem.
-Acceptance: Tiny export script; no heavy dependency in CI.
+User story: As a researcher, I export rows to a minimal τ-Bench format and check against its judge/tasks offline.
+Value: Bridge to ecosystem; comparisons without CI bloat.
+Done when: Tiny export script; no heavy dependency in CI.
 
-EXP-017 — Docs: “From threat model to evidence” guide
+EXP-017 — Guide: “From threat model to evidence”
 
-User story: As a new team, I can follow a 10-minute guide to go from a sample threat model to an OK/WARN/FAIL report, understanding gates/evaluator/thresholds.
-Value: Crisp onboarding & alignment.
-Acceptance: Single-page tutorial linked from README; verified by PR dry-run.
+User story: As a new team, I follow a 10-minute guide from sample threat model → OK/WARN/FAIL report, understanding gates/evaluator/thresholds on the way.
+Value: Faster onboarding & alignment.
+Done when: Single page tutorial linked from README; validated by PR dry-run.
 
 EXP-018 — Observability hooks (lightweight)
 
-User story: As an operator, I can enable a “debug” mode to persist redacted request/response snippets and gate decisions for a few trials.
-Value: Faster triage with no secret leaks.
-Acceptance: Redacted snippets in per-run folder; opt-in; off on PRs by default.
+User story: As an operator, I enable a debug mode to persist redacted request/response snippets and gate decisions for a few trials.
+Value: Faster triage; no secret leakage.
+Done when: Redacted snippets in per-run folder; opt-in; off on PR by default.
 
 📚 Later / lower-priority backlog
 EXP-019 — Richer report visuals
 
-User story: As a stakeholder, I can see stacked allow/warn/deny by reason, trend sparkline, and top-N failure exemplars.
-Value: Quicker insights for non-engineers.
-Acceptance: Add-only charts; zero change to data contracts.
+User story: As a stakeholder, I see stacked allow/warn/deny by reason, a trend sparkline, and top-N exemplar failures.
+Value: Faster, non-engineer insights.
+Done when: Add-only charts; no data contract changes.
 
 EXP-020 — Result navigation & diff
 
-User story: As a maintainer, I can list last N runs, open any report quickly, and diff summary metrics between two runs.
-Value: Fast regression triage.
-Acceptance: tools/latest_run.py gains --history N; simple metric diff.
+User story: As a maintainer, I list last N runs and diff summary metrics between any two runs.
+Value: Quick regression triage.
+Done when: tools/latest_run.py gains --history N; simple metric diff output.
 
 EXP-021 — Pip cache in CI
 
-User story: As a contributor, PR runs complete sooner thanks to cached wheels for pinned deps.
-Value: Faster CI.
-Acceptance: actions/setup-python cache enabled; CI time measurably lower.
+User story: As a contributor, PR runs finish faster via cached wheels for pinned deps.
+Value: Faster CI; lower friction.
+Done when: actions/setup-python cache enabled; measurable time drop.
 
 EXP-022 — Security hygiene: secret scanning & log scrubbing
 
-User story: As a maintainer, accidental secrets are blocked in PRs and sensitive response text is scrubbed from exceptions.
+User story: As a maintainer, accidental secrets are blocked in PRs and sensitive text is scrubbed from exceptions.
 Value: Lower risk in logs/artifacts.
-Acceptance: Secret scanning step on PR; provider error handler redacts bodies.
+Done when: Secret scanning on PR; provider error handler redacts response bodies.
 
-🧪 Guardrails we’ll keep measuring
+🧪 Guardrails we keep measuring
 
-Determinism rate: identical cases.jsonl order with same seed (CI test)
+Determinism rate: cases order identical for same seed.
 
-Callable ratio: callable / total (pre-denies are intentional)
+Callable ratio: % of trials reaching provider (pre-deny removed).
 
-Pass-rate over callable: success / callable (primary quality signal)
+Pass-rate over callable: success / callable (primary quality signal).
 
-Budget adherence: no step exceeds caps; early-stop badge present when triggered
+Budget adherence: caps respected; early-stop badge shown when triggered.
 
-CI SLAs: PR (dry-run) ≤ 5 min, main (real) within expected token/call budget
+CI SLAs: PR dry-run ≤ 5 min; main (real) within configured call/token budget.
 
-Onboarding friction: Quickstart succeeds on fresh clone in ≤ 3 commands
+Onboarding friction: fresh clone to report in ≤ 3 commands.
 
 ⬇️ Displaced (lower priority; preserved)
 
+(Items auto-moved here from the previous backlog that are not listed above; kept verbatim for traceability.)
 No items are being dropped—everything not listed above stays here for tracking. Move items back up when they become relevant.
 
 <!-- BACKLOG:END -->
