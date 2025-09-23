@@ -56,6 +56,8 @@ jobs:
     name: "REAL τ-Bench risky (Groq)"
     if: ${{ github.repository_owner == 'jasonstan' }}
     runs-on: ubuntu-latest
+    env:
+      STRICT: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.strict) || vars.THRESHOLD_STRICT || vars.STRICT || '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -240,6 +242,18 @@ jobs:
             --html "results/LATEST/index.html" \
             --svg "results/${RUN_ID}/summary.svg" \
             --svg "results/LATEST/summary.svg"
+
+      - name: Threshold summary
+        if: always()
+        shell: bash
+        continue-on-error: ${{ !(env.STRICT == '1' || env.STRICT == 'true' || env.STRICT == 'TRUE' || env.STRICT == 'True') }}
+        env:
+          RUN_ID: ${{ env.RUN_ID }}
+          STRICT: ${{ env.STRICT }}
+        run: |
+          set -euo pipefail
+          STRICT_VALUE="${STRICT:-0}"
+          make check-thresholds STRICT="${STRICT_VALUE}"
 
       - name: Diagnose outputs (list RUN_DIR and preview CSV)
         if: always()

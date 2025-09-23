@@ -9,7 +9,7 @@
 #   RUN_ID  ?= (timestamp default)     # results/<RUN_ID>; persisted via results/.run_id
 # ------------------------------------------------------------------------------
 
-.PHONY: venv install test run sweep aggregate report scaffold check-schema plot notes sweep3 real1 xrun xsweep xsweep-all topn demo test-unit ci latest tidy-run open-artifacts list-runs journal install-tau help vars
+.PHONY: venv install test run sweep aggregate report scaffold check-schema plot notes sweep3 real1 xrun xsweep xsweep-all topn demo test-unit ci latest tidy-run open-artifacts list-runs journal install-tau help vars check-thresholds
 
 SHELL := /bin/bash
 
@@ -197,6 +197,24 @@ report: aggregate plot notes latest ## Publish artifacts to results/ and refresh
 	python scripts/update_readme_results.py; \
 	python scripts/update_readme_topn.py; \
 	fi
+
+.PHONY: check-thresholds
+check-thresholds: ## Evaluate aggregated metrics against thresholds.yaml
+	@set -euo pipefail; \
+	PYBIN="$(PYTHON)"; \
+	if [ -x "$(PY)" ]; then PYBIN="$(PY)"; fi; \
+	RID="$(RUN_ID)"; \
+	if [ -n "$$RID" ] && [ ! -d "$(RESULTS_DIR)/$$RID" ]; then RID=""; fi; \
+	if [ -z "$$RID" ] && [ -f "$(RESULTS_DIR)/.run_id" ]; then RID="$$(cat $(RESULTS_DIR)/.run_id)"; fi; \
+	CMD="\"$$PYBIN\" tools/check_thresholds.py --results-root \"$(RESULTS_DIR)\" --thresholds \"thresholds.yaml\""; \
+	STRICT_VALUE="$(STRICT)"; \
+	case "$$STRICT_VALUE" in \
+	1|true|TRUE|True|yes|YES|on|ON) CMD="$$CMD --strict";; \
+	esac; \
+	if [ -n "$$RID" ]; then \
+	CMD="RUN_ID=\"$$RID\" $$CMD"; \
+	fi; \
+	eval "$$CMD"
 
 real1:
 	$(MAKE) run SEED=42 TRIALS=5 MODE=REAL

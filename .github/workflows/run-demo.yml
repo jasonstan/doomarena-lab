@@ -56,6 +56,17 @@ jobs:
         run: |
           make report RUN_ID="${RUN_ID}"
 
+      - name: Threshold summary
+        if: always()
+        shell: bash
+        continue-on-error: true
+        env:
+          RUN_ID: ${{ env.RUN_ID }}
+          STRICT: '0'
+        run: |
+          set -euo pipefail
+          make check-thresholds STRICT="${STRICT}"
+
       - name: Refresh latest pointer
         shell: bash
         run: |
