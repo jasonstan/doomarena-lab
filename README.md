@@ -94,7 +94,21 @@ The GitHub Action exposes the same inputs (`max_trails`/`max_trials`, `max_total
   - `summary.svg` — simple plot for PRs
   - `run.json` — run metadata + **gate audit**
   - Per-experiment folders (e.g., `tau_risky_real/rows.jsonl`)
-- Optional **thresholds** in `thresholds.yaml` (`min_trials`, `max_asr`, `min_asr`); CI can WARN by default or FAIL in strict jobs.
+- Optional **thresholds** in `thresholds.yaml` (run-level mins/maxes + policy) drive CI status after aggregation.
+
+### Thresholds & CI status
+`tools/check_thresholds.py` reads run metrics + `thresholds.yaml` and prints an `OK/WARN/FAIL` line:
+
+```yaml
+version: 1
+min_total_trials: 1
+min_callable_trials: 1
+min_pass_rate: 0.50
+max_post_deny: 0
+policy: warn
+```
+
+Run `make check-thresholds` locally (`STRICT=1 make check-thresholds` to fail). In Actions → `run-real-mvp`, set `STRICT=1` to turn WARN into FAIL.
 
 ## CI usage
 - **GitHub → Actions → `run-real-mvp` → Run workflow**

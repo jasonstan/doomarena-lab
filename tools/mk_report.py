@@ -265,6 +265,34 @@ def build_overview_badge(report: dict[str, object]) -> str:
     return f"<span class='badge badge-warn'>Stopped early: {html.escape(hit)}</span>"
 
 
+def build_threshold_badge(report: dict[str, object]) -> str:
+    thresholds = report.get("thresholds")
+    if not isinstance(thresholds, dict):
+        return ""
+    status = str(thresholds.get("status") or "").upper()
+    summary = str(thresholds.get("summary") or "").strip()
+    policy = str(thresholds.get("policy") or "").strip()
+    strict_flag = thresholds.get("strict")
+
+    css_class = {
+        "OK": "badge-ok",
+        "WARN": "badge-warn",
+        "FAIL": "badge-fail",
+    }.get(status, "badge-warn")
+
+    title_bits: list[str] = []
+    if policy:
+        title_bits.append(f"policy={policy}")
+    if isinstance(strict_flag, bool):
+        title_bits.append(f"strict={'1' if strict_flag else '0'}")
+    title_attr = f" title=\"{html.escape('; '.join(title_bits))}\"" if title_bits else ""
+
+    if not summary:
+        summary = f"THRESHOLDS: {status or 'UNKNOWN'}"
+
+    return f"<span class='badge {css_class}'{title_attr}>{html.escape(summary)}</span>"
+
+
 def build_evaluator_panel(report: dict[str, object]) -> str:
     evaluator = report.get("evaluator") if isinstance(report.get("evaluator"), dict) else None
     if not isinstance(evaluator, dict):
@@ -476,7 +504,9 @@ def render_template(context: dict[str, str]) -> str:
       .evaluator-panel .label{font-weight:600;margin-right:4px;}
       .evaluator-panel .meta{color:#52606d;font-size:12px;margin-left:6px;}
       .badge{display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;font-size:12px;font-weight:600;}
+      .badge-ok{background:#dcfce7;color:#166534;}
       .badge-warn{background:#fef3c7;color:#92400e;}
+      .badge-fail{background:#fee2e2;color:#b91c1c;}
       .overview-budget{margin-top:10px;font-size:14px;color:#52606d;}
       table{border-collapse:collapse;width:100%;max-width:980px;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 2px rgba(15,23,42,0.08);}
       th,td{border:1px solid #e5e7eb;padding:8px 10px;font-size:14px;text-align:left;}
@@ -494,6 +524,7 @@ def render_template(context: dict[str, str]) -> str:
     $BANNERS
     <div class='overview-header'>
       <h2>Overview</h2>
+      $THRESHOLD_BADGE
       $OVERVIEW_BADGE
     </div>
     $OVERVIEW
@@ -550,6 +581,7 @@ def write_report(run_dir: Path) -> None:
         "HEADER_TITLE": "DoomArena-Lab Run Report",
         "META": meta_html,
         "BANNERS": build_banners(report, policy_ids),
+        "THRESHOLD_BADGE": build_threshold_badge(report),
         "OVERVIEW_BADGE": build_overview_badge(report),
         "OVERVIEW": build_overview(report),
         "EVALUATOR_PANEL": build_evaluator_panel(report),
