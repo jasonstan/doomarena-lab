@@ -265,6 +265,72 @@ def build_overview_badge(report: dict[str, object]) -> str:
     return f"<span class='badge badge-warn'>Stopped early: {html.escape(hit)}</span>"
 
 
+def build_evaluator_panel(report: dict[str, object]) -> str:
+    evaluator = report.get("evaluator") if isinstance(report.get("evaluator"), dict) else None
+    if not isinstance(evaluator, dict):
+        return "<p><em>No evaluator metadata recorded.</em></p>"
+    version = str(evaluator.get("version") or "–")
+    rules_total = evaluator.get("rules_total")
+    rules_total_text = "–"
+    if isinstance(rules_total, (int, float)):
+        try:
+            rules_total_text = str(int(rules_total))
+        except (TypeError, ValueError):
+            rules_total_text = str(rules_total)
+    elif isinstance(rules_total, str) and rules_total.strip():
+        rules_total_text = rules_total.strip()
+    rule_ids = evaluator.get("active_rule_ids")
+    if isinstance(rule_ids, list):
+        tokens = [str(item).strip() for item in rule_ids if str(item).strip()]
+        rule_text = ", ".join(tokens) if tokens else "–"
+    else:
+        rule_text = "–"
+    callable_trials = _as_int(
+        evaluator.get("callable_trials"),
+        _as_int(report.get("callable_trials"), 0),
+    )
+    successes = _as_int(
+        evaluator.get("successes"),
+        _as_int(report.get("passed_trials"), 0),
+    )
+    pass_rate_display = ""
+    rate_info = evaluator.get("pass_rate") if isinstance(evaluator.get("pass_rate"), dict) else None
+    if isinstance(rate_info, dict):
+        display = rate_info.get("display")
+        if display:
+            pass_rate_display = str(display)
+    if not pass_rate_display:
+        overall_rate = report.get("pass_rate") if isinstance(report.get("pass_rate"), dict) else None
+        if isinstance(overall_rate, dict):
+            display = overall_rate.get("display")
+            if display:
+                pass_rate_display = str(display)
+    if not pass_rate_display:
+        pass_rate_display = "0.0%"
+    config_path = str(evaluator.get("config_path") or "").strip()
+    ratio_text = f"{successes}/{callable_trials}" if callable_trials else f"{successes}/0"
+    items = [
+        "<div class='item'><span class='label'>Version:</span> "
+        + f"<span class='value'>{html.escape(version)}</span>"
+        + f"<span class='meta'>(rules: {html.escape(rules_total_text)})</span></div>",
+        "<div class='item'><span class='label'>Active rule(s):</span> "
+        + f"<span class='value'>{html.escape(rule_text)}</span></div>",
+        "<div class='item'><span class='label'>Callable trials:</span> "
+        + f"<span class='value'>{callable_trials}</span></div>",
+        "<div class='item'><span class='label'>Successes:</span> "
+        + f"<span class='value'>{successes}</span></div>",
+        "<div class='item'><span class='label'>Pass rate:</span> "
+        + f"<span class='value'>{html.escape(pass_rate_display)}</span>"
+        + f"<span class='meta'>({html.escape(ratio_text)})</span></div>",
+    ]
+    if config_path:
+        items.append(
+            "<div class='item'><span class='label'>Rules file:</span> "
+            + f"<span class='value'>{html.escape(config_path)}</span></div>"
+        )
+    return "<div class='evaluator-panel'>" + "".join(items) + "</div>"
+
+
 def _clean_status_message(kind: str, message: str) -> str:
     prefix = f"RUN {kind.upper()}:"
     text = message.strip()
@@ -405,6 +471,10 @@ def render_template(context: dict[str, str]) -> str:
       .overview-card .label{font-size:12px;text-transform:uppercase;letter-spacing:0.06em;color:inherit;opacity:0.7;}
       .overview-card .value{font-size:20px;font-weight:600;margin-top:4px;}
       .overview-card .sub{font-size:13px;margin-top:2px;opacity:0.8;}
+      .evaluator-panel{background:#ffffff;padding:12px 16px;border-radius:8px;box-shadow:0 1px 2px rgba(15,23,42,0.08);margin:16px 0;}
+      .evaluator-panel .item{font-size:14px;margin:4px 0;color:#1f2933;}
+      .evaluator-panel .label{font-weight:600;margin-right:4px;}
+      .evaluator-panel .meta{color:#52606d;font-size:12px;margin-left:6px;}
       .badge{display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;font-size:12px;font-weight:600;}
       .badge-warn{background:#fef3c7;color:#92400e;}
       .overview-budget{margin-top:10px;font-size:14px;color:#52606d;}
@@ -427,6 +497,8 @@ def render_template(context: dict[str, str]) -> str:
       $OVERVIEW_BADGE
     </div>
     $OVERVIEW
+    <h2>Evaluator</h2>
+    $EVALUATOR_PANEL
     <h2>Summary chart</h2>
     $SUMMARY_CHART
     <h2>Summary table</h2>
@@ -480,6 +552,7 @@ def write_report(run_dir: Path) -> None:
         "BANNERS": build_banners(report, policy_ids),
         "OVERVIEW_BADGE": build_overview_badge(report),
         "OVERVIEW": build_overview(report),
+        "EVALUATOR_PANEL": build_evaluator_panel(report),
         "SUMMARY_CHART": svg_tag,
         "SUMMARY_TABLE": table_html,
         "TOP_REASONS": build_reason_table(report),
