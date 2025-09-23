@@ -219,7 +219,12 @@ ci: install ## CI entrypoint: minimal sweep & report (used in smoke)
 
 .PHONY: latest
 latest:
-	@$(PYTHON) tools/latest_run.py $(RESULTS_DIR) $(LATEST_LINK) || true
+	@if $(PYTHON) tools/latest_run.py $(RESULTS_DIR) $(LATEST_LINK); then \
+		: ; \
+	else \
+		echo "ERROR: failed to update results/LATEST; see logs" >&2; \
+		exit 1; \
+	fi
 
 tidy-run: ## Remove redundant files in results/$(RUN_ID) (timestamped copies, PNG)
 	@d="results/$(RUN_ID)"; \

@@ -41,11 +41,12 @@
 
 ## Quickstart
 ```bash
+pip install -r requirements-ci.txt   # or: make install
+
 # 1) Set provider secret
 export GROQ_API_KEY=...
 
 # 2) Run the REAL slice locally (cheap default)
-pip install -r requirements-ci.txt   # or: make install
 python -m scripts.experiments.tau_risky_real --trials 6 --seed 42
 
 # 3) Build report
