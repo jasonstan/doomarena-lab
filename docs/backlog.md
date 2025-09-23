@@ -1,140 +1,139 @@
 <!-- BACKLOG:BEGIN -->
+DoomArena-Lab Backlog
 
-# DoomArena-Lab Backlog
+Last updated: 2025-09-23 (UTC)
 
-_Last updated: 2025-09-23_
+🎯 What “good” looks like (MVP e2e)
 
-## 🎯 What “good” looks like (MVP e2e)
-A single command / CI run that goes from a tiny, declarative **threat model** → concrete **test cases** → **governed execution** on a low-cost model → **gate-aware report** (CSV/SVG/HTML) with **explicit thresholds** and a clear **OK/WARN/FAIL** in CI.
+A single command / CI run that goes from a tiny, declarative threat model → deterministic test cases → governed execution on a low-cost model → gate-aware report (CSV/SVG/HTML) → thresholds verdict (OK/WARN/FAIL) in CI.
 
-### Minimum user story (by end of week)
-> Given a one-page `threat_model.yaml` describing risky behaviors (refund limits, approval rules), I can:
-> 1) **generate** deterministic test cases,
-> 2) **execute** them with policy gates & budgets,
-> 3) **produce** a human-readable, gate-aware report,
-> 4) **enforce** thresholds (e.g., pass-rate over callable trials ≥ X%) and get a clear **OK/WARN/FAIL** in CI.
+Success measures
 
-_No τ-Bench dependency; lean slice end-to-end._
+Determinism: same threat_model.yaml + seed ⇒ same cases & input_case order
 
-## ✅ / 🟡 / ❌ — Where we are vs. that bar
-- **Generation**
-  - ❌ **EXP-007 — Threat model → cases translator.** Need a tiny YAML schema + deterministic case expansion feeding the REAL slice.
-- **Execution**
-  - ✅ **EXP-001 — REAL slice emits rows** (`rows.jsonl` + `run.json`).
-  - ✅ **EXP-002 — Governance gates + audit (structured)**; decisions logged per trial.
-  - ✅ **EXP-004 — CI guardrails & messages**; meaningful RUN OK/WARN/FAIL.
-  - 🟡 **EXP-005 — Cost/volume controls**; budgets and early-stop reporting being finalized.
-- **Aggregation & reporting**
-  - ✅ **EXP-003 — Gate-aware aggregation + HTML** (overview, banners, links).
-  - ✅ LATEST copying and reproducible structure.
-- **Policy/thresholds**
-  - ❌ **EXP-009 — Declarative thresholds → CI status** (min trials/callable, pass-rate, post-deny caps).
-- **DX/docs**
-  - ✅ README story + formatting updated.
-  - ✅ Backlog consolidated.
-  - 🟡 **EXP-006 (lite)** — convenience: `make mvp`, `.env.example`, `make open-report`.
+Governance evidence: callable vs. pre-denied trials; post-gate reasons; pass-rate over callable
 
-## 📌 Rationale (what we’re measuring ourselves against)
-We’re optimizing for a credible, cheap, repeatable pipeline that converts a **threat model** into **evidence**:
-- **Determinism:** same `threat_model.yaml` + seed ⇒ same cases.
-- **Governance-aware evidence:** pass-rate over callable trials; allow/warn/deny counts; top reason codes.
-- **Cost control:** predictable token/call ceilings; graceful stop on budget.
-- **Clarity in CI:** thresholds map to OK/WARN/FAIL; red/yellow banners explain “no data” or “all pre-denied”.
+CI clarity & safety: explicit thresholds → OK/WARN/FAIL; PR runs safe (dry-run); main runs real with budgets
 
-## 🧭 On tap next (current sprint)
-- **EXP-007 — Threat model → cases translator (mini)**
-  - **Why now:** Eliminates handcrafted prompts; gives a durable, declarative input.
-  - **What:** Define `threat_model.yaml` (soft/hard limits, approval cues, amounts grid); translator expands to a deterministic case table (`input_case`, text, hints). Stamp `run.json.generation={source:'threat_model.yaml', seed, cases}`.
-  - **Done when:** Same YAML + seed yields the same N cases; rows reference the generation.
+Cost: default config runs in pennies
 
-- **EXP-008 — Declarative success rules (eval mini)**
-  - **Why now:** Make pass/fail explicit and auditable.
-  - **What:** Move evaluator rules into `policies/evaluator.yaml` (or JSON). Rows include `judge_rule_id`; report computes pass-rate over callable trials.
-  - **Done when:** Evaluator loads rules; report reflects them (no hard-coded logic).
+✅ / 🟡 / ❌ — Where we are vs. the bar
+Area	Status	What we have now
+Case generation (translator)	✅	specs/threat_model.yaml → deterministic cases.jsonl with input_case, amount, persona
+REAL execution + rows	✅	Rows JSONL per trial, run.json, stable schema
+Governance gates (pre/post)	✅	Config in policies/gates.yaml; reason codes; budget caps; callable flag
+Evaluator rules	✅	policies/evaluator.yaml; judge_rule_id; success on each row
+Aggregation & report	✅	HTML with status banner, callable/pass panels, top reasons, CSV/SVG links
+Thresholds → CI status	✅	thresholds.yaml + verifier prints + sets OK/WARN/FAIL
+CI stability & safety	✅	Python 3.11, pinned deps, preflight, dry-run on PR, artifacts always upload
+DX one-command run	✅	make mvp, .env.example, make open-report
+Tests (regression)	✅	Offline tests for CLI, generation determinism, evaluator, thresholds
+Perf & scale guardrails	🟡	Works for MVP sizes; streaming/large-run safeguards are TODO
+Config validation	🟡	Basic checks; formal schema validation (YAML/JSON) is TODO
 
-- **EXP-009 — Metric thresholds → CI status**
-  - **Why now:** CI should gate quality, not only execution.
-  - **What:** Add `thresholds.yaml` with `min_total_trials`, `min_callable_trials`, `min_pass_rate`, `max_post_deny` (optional `max_post_warn`). Verifier prints `THRESHOLDS: OK|WARN|FAIL` and sets job status.
-  - **Done when:** CI outcome matches thresholds and prints a one-line summary.
+✅ Recently shipped (highlights)
 
-- **EXP-006 (lite) — DX polish**
-  - **Why now:** Faster local iteration.
-  - **What:** `make mvp` (translator → execute → aggregate), `.env.example`, `make open-report`.
+EXP-006 (DX): make mvp, .env.example, make open-report
 
-## 🧪 P1 audit fixes (in scope, behavior-preserving)
-- **AUD-T01 — REAL slice CLI drift tests**  
-  **Why:** Prevent future argparse mismatches.  
-  **What:** Add `tests/test_tau_risky_real_cli.py` to assert legacy flags accepted (`--seeds/--outdir/--risk`), `--seed` precedence, dry-run writes `results/.run_id`, aggregator produces `index.html`/`summary.csv`. No provider calls in tests.
+EXP-007: Threat model → deterministic cases translator
 
-- **AUD-CI01 — Stop masking “latest” failures**  
-  **Why:** CI must be truthful.  
-  **What:** In `run-demo.yml` and `Makefile` `latest` target, remove `|| true` masking; fail with a clear message; still upload prior artifacts.
+EXP-008: Declarative evaluator (evaluator.yaml), judge_rule_id, success
 
-- **AUD-DOC01 — README install step**  
-  **Why:** Avoid ImportErrors for new contributors.  
-  **What:** Ensure Quickstart starts with `pip install -r requirements-ci.txt` (or `make install`).
+EXP-009: thresholds.yaml + verifier → OK/WARN/FAIL in CI
 
-## ✅ Recently done (highlights)
-- **#165 #168 #170 — CI hardening & deps**: PR-safe dry-run, artifact guards, `requests`/`numpy 1.26.x`/`pandas 2.2.x`/`matplotlib 3.8.x`, Python 3.11 pin, unified `python -m pip`, preflight script.
-- **EXP-001/002/003/004 — Rows, governance audit, gate-aware report, guardrails** integrated.
-- **README + backlog** story/formatting improved; duplicate backlog files consolidated.
+EXP-010: Report polish — status banner, callable/pass panels, top reasons, data links
 
-## ⏱ Near-term priorities (next 1–2 weeks)
-- **Complete EXP-005 — Cost/volume controls** (budgets, stopped-early badge, CSV/HTML append-only fields).
-- **Finish AUD-T01/AUD-CI01/AUD-DOC01** (tests, CI truthfulness, docs).
-- **Kick off EXP-007/008/009** in that order to reach the MVP story.
+EXP-011: Governance gates v1 — configurable pre/post gates, reason codes, budgets, audit
 
-## 📚 Backlog (later / nice-to-have)
-- **EXP-010 — Risky slice task library expansion** (refund variants; tag `input_case`; ≤20 seeds).
-- **EXP-011 — τ-Bench interop (optional)** (adapter for offline compare).
-- **EXP-012 — Governance visualizations** (stacked a/w/d; top reasons table; policy drift sparkline).
-- **EXP-013 — Provider matrix** (Groq/OpenAI/Local via inputs; same row schema).
+Audit P0/P1 fixes: CI hardening, deps pins, preflight, YAML fixes, artifact guards
 
-## ⬇️ Displaced (lower priority; preserved from previous backlog)
-_(Auto-collected from the prior backlog content not appearing in the sections above; keep items verbatim for traceability.)_
+Tests: Offline regression for CLI/generation/evaluator/thresholds
 
-- **EXP-001 — REAL slice emits JSONL rows**
-  **Impact:** Unblocks aggregation; HTML/CSV/SVG now populate from CI.
-  **Details:** Writes `rows.jsonl` + `run.json` per run; rows include success/judge flags and gate outcomes (basic).
+🧭 On tap next (1-week plan)
+EXP-012 — Config validation (schemas + preflight)
 
-- **EXP-002 (spec) — Governance gates + audit (tighten)**
-  **Impact:** Clear contract for structured gate decisions and audit roll-up.
-  **Details:** Policy config file, `GateDecision` shape, gate summary line for CI. (Implementation next.)
+User story: As a contributor, when I typo a field in threat_model.yaml/gates.yaml/evaluator.yaml/thresholds.yaml, I get a crisp validation error during preflight telling me which field and why, before any run starts.
+Value: Catch bad YAML early; keep CI green; faster onboarding.
+Acceptance: JSON Schema (or pydantic) validators wired in tools/ci_preflight.py; failing schema blocks run with a clear, single message; README links to schema.
 
-- **EXP-002 (impl) — Governance gates + audit**
-  **Why now:** Enforceable rules + transparent audit before scaling trials.
-  **What to implement:** `GateDecision` schema; policy file; extend rows with `pre_call_gate.*`/`post_call_gate.*`; `run.json.gate_summary`; CI “GATES:” line; “all pre-denied” warning.
+EXP-013 — Streaming/large-run safety
 
-- **EXP-003 — Aggregator & report: gate-aware summaries**
-  **Why now:** Report should explain outcomes, not just plot pass rates.
-  **What to implement:** Compute pass rate, token & latency stats; include gate breakdowns (allow/warn/deny, top reason); clear **No-Data / All-Denied** banner in `index.html`. CSV additions are backward-compatible.
+User story: As a maintainer, I can aggregate 50k+ rows using O(1) memory streaming, and CI time stays predictable.
+Value: Prevent OOM/spikes; keep aggregation fast as runs grow.
+Acceptance: aggregate_results.py streams JSONL; no list accumulation on hot paths; test covers a large synthetic file.
 
-- **EXP-004 — CI guardrails & failure messaging**
-  **Rationale:** Fail loud on misconfig (missing secret, zero rows).
-  **Detail:** If `rows.jsonl` < trials → fail job with human message; if 0 callable trials (all pre-denied) → succeed with yellow banner + rationale.
+EXP-014 — Budget & early-stop UX polish
 
-- **EXP-005 — Cost/volume controls**
-  **Rationale:** Keep runs cheap & deterministic.
-  **Detail:** Add `--max_tokens`, `--temperature`, soft ceiling on total tokens per run; CSV shows `total_tokens` and est. `$`.
+User story: As a user, I can set max_calls/max_total_tokens, see an Early stop badge, and the job exits with a friendly note when limits are hit.
+Value: Clear guardrails for cost & time.
+Acceptance: Consistent budget fields in run.json, HTML badge, thresholds/verifier unaffected.
 
-- **EXP-006 — Repro & DX polish**
-  **Rationale:** Smoother local use.
-  **Detail:** `make real` prints `RUN_ID`; `make open-report` opens `results/LATEST/index.html`; `.env.example`.
+⏱ Near-term (2–3 weeks)
+EXP-015 — Provider matrix (same slice, multiple backends)
 
-- **EXP-010 — Task library expansion for risky slice**
-  **Why:** More realistic refund-like variants.
-  **Detail:** Tag `input_case`; ≤20 stable seeds for CI.
+User story: As a platform owner, I can flip inputs to run the identical slice on Groq/OpenAI/Local and compare CSVs.
+Value: Apples-to-apples comparisons without retooling.
+Acceptance: Adapters share the same row schema; selector via CLI/workflow; CI runs the cheap default on PRs.
 
-- **EXP-011 — τ-Bench interop (optional)**
-  **Why:** Align with community formats without CI bloat.
-  **Detail:** Adapter layer to ingest/export τ-Bench offline.
+EXP-016 — τ-Bench interop (optional adapter)
 
-- **EXP-012 — Governance visualizations**
-  **Why:** Faster triage.
-  **Detail:** Stacked bar (allow/warn/deny), top reasons table, “policy drift” sparkline over last N runs.
+User story: As a researcher, I can export rows to a minimal τ-Bench format and sanity-check against its judge/tasks offline.
+Value: Bridge to the broader ecosystem.
+Acceptance: Tiny export script; no heavy dependency in CI.
 
-- **EXP-013 — Provider matrix**
-  **Why:** Portability & price/perf comparisons.
-  **Detail:** Abstract provider call; Groq/OpenAI/Local via input; same row schema.
+EXP-017 — Docs: “From threat model to evidence” guide
+
+User story: As a new team, I can follow a 10-minute guide to go from a sample threat model to an OK/WARN/FAIL report, understanding gates/evaluator/thresholds.
+Value: Crisp onboarding & alignment.
+Acceptance: Single-page tutorial linked from README; verified by PR dry-run.
+
+EXP-018 — Observability hooks (lightweight)
+
+User story: As an operator, I can enable a “debug” mode to persist redacted request/response snippets and gate decisions for a few trials.
+Value: Faster triage with no secret leaks.
+Acceptance: Redacted snippets in per-run folder; opt-in; off on PRs by default.
+
+📚 Later / lower-priority backlog
+EXP-019 — Richer report visuals
+
+User story: As a stakeholder, I can see stacked allow/warn/deny by reason, trend sparkline, and top-N failure exemplars.
+Value: Quicker insights for non-engineers.
+Acceptance: Add-only charts; zero change to data contracts.
+
+EXP-020 — Result navigation & diff
+
+User story: As a maintainer, I can list last N runs, open any report quickly, and diff summary metrics between two runs.
+Value: Fast regression triage.
+Acceptance: tools/latest_run.py gains --history N; simple metric diff.
+
+EXP-021 — Pip cache in CI
+
+User story: As a contributor, PR runs complete sooner thanks to cached wheels for pinned deps.
+Value: Faster CI.
+Acceptance: actions/setup-python cache enabled; CI time measurably lower.
+
+EXP-022 — Security hygiene: secret scanning & log scrubbing
+
+User story: As a maintainer, accidental secrets are blocked in PRs and sensitive response text is scrubbed from exceptions.
+Value: Lower risk in logs/artifacts.
+Acceptance: Secret scanning step on PR; provider error handler redacts bodies.
+
+🧪 Guardrails we’ll keep measuring
+
+Determinism rate: identical cases.jsonl order with same seed (CI test)
+
+Callable ratio: callable / total (pre-denies are intentional)
+
+Pass-rate over callable: success / callable (primary quality signal)
+
+Budget adherence: no step exceeds caps; early-stop badge present when triggered
+
+CI SLAs: PR (dry-run) ≤ 5 min, main (real) within expected token/call budget
+
+Onboarding friction: Quickstart succeeds on fresh clone in ≤ 3 commands
+
+⬇️ Displaced (lower priority; preserved)
+
+No items are being dropped—everything not listed above stays here for tracking. Move items back up when they become relevant.
 
 <!-- BACKLOG:END -->
