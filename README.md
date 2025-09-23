@@ -35,6 +35,7 @@
 - **REAL risky slice now writes rows** → `results/<RUN_ID>/tau_risky_real/rows.jsonl` + `run.json`
 - **Aggregation works end-to-end** → `results/LATEST/summary.csv`, `summary.svg`, `index.html`
 - **Basic governance hooks** → pre/post gates recorded in rows and audited in `run.json`
+- **Governance policy** → see [docs/governance_gates.md](docs/governance_gates.md) for rule syntax, reason codes, and budget defaults.
 - **CI workflows**
   - `run-demo`: local logic smoke; uploads artifacts  
   - `run-real-mvp`: Groq model, manual dispatch with inputs (model, trials, seed)
@@ -113,8 +114,8 @@ Run `make check-thresholds` locally (`STRICT=1 make check-thresholds` to fail). 
   - `run-<timestamp>.zip` — full per-run folder
 
 ## Data layout (contract)
-- **Rows (per trial):** JSON object with  
-  `run_id, exp, seed, trial, model, latency_ms, prompt_tokens, completion_tokens, total_tokens, cost_usd, success, judge_score, fail_reason, pre_call_gate, post_call_gate, input_case, timestamp`
+- **Rows (per trial):** JSON object with
+  `run_id, exp, seed, trial, model, latency_ms, prompt_tokens, completion_tokens, total_tokens, cost_usd, success, judge_score, fail_reason, callable, pre_call_gate, post_call_gate, pre_gate, post_gate, input_case, timestamp`
 - **Run audit (`run.json`):** start/finish timestamps and gate audit entries.  
   *Next:* `gate_summary` + CI “GATES” line (see EXP-002).
 
@@ -182,3 +183,24 @@ PR runs use a dry-run (no provider calls) to keep CI safe and secret-free. REAL 
 ## Contributing
 PRs welcome. Keep demos fast and artifacts reproducible. Aim for small, reviewable changes.
 
+
+## Results
+<!-- RESULTS:BEGIN -->
+
+![Results summary](results/summary.svg)
+
+| exp | seeds | mode | ASR | trials | successes | git | run_at |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| airline_escalating_v1 | 99 | SHIM | 0.00 (0/2) | 2 | 0 | UNKNOWN | 2025-09-23T20:38:37Z |
+| airline_escalating_v1 | 99 | SHIM | 0.00 (0/2) | 2 | 0 | UNKNOWN | 2025-09-23T20:38:36Z |
+
+<!-- RESULTS:END -->
+
+<!-- TOPN:BEGIN -->
+## Latest experiments — Top N by ASR
+
+|rank|exp_id|ASR|mode|trials|seeds|commit|run_at|
+|---|---|---|---|---|---|---|---|
+|1|airline_escalating_v1:99|0.000|SHIM|2|99|UNKNOWN|2025-09-23T20:38:37Z|
+|2|airline_escalating_v1:99|0.000|SHIM|2|99|UNKNOWN|2025-09-23T20:38:36Z|
+<!-- TOPN:END -->

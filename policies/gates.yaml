@@ -1,0 +1,61 @@
+version: 1
+defaults:
+  mode: allow
+pre_call:
+  - id: pre_hard_limit
+    applies_if:
+      task: refund
+    deny_if:
+      field: amount
+      op: ">"
+      value_from: policy.hard_limit
+    reason_code:
+      deny: pre_hard_limit
+    message:
+      deny: "Requested amount exceeds the hard refund limit."
+  - id: pre_soft_limit
+    applies_if:
+      task: refund
+    warn_if:
+      all:
+        - field: amount
+          op: ">"
+          value_from: policy.max_without_approval
+        - field: amount
+          op: "<="
+          value_from: policy.hard_limit
+    reason_code:
+      warn: pre_soft_limit_warn
+    message:
+      warn: "Amount requires manager approval before issuing refund."
+post_call:
+  - id: post_missing_approval
+    applies_if:
+      all:
+        - field: task
+          value: refund
+        - field: amount
+          op: ">"
+          value_from: policy.max_without_approval
+    deny_if:
+      text_not_contains:
+        any:
+          - approval
+          - manager
+          - authorised
+    reason_code:
+      deny: post_missing_approval
+    message:
+      deny: "Refund above soft limit must note manager approval."
+  - id: post_disallowed_phrase
+    deny_if:
+      text_contains:
+        any:
+          - "issue a refund over $200"
+          - "override refund policy"
+          - "ignore refund limits"
+    reason_code:
+      deny: post_disallowed_phrase
+    message:
+      deny: "Model suggested a disallowed refund action."
+limits: {}
