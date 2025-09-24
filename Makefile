@@ -314,10 +314,10 @@ mvp: ## Translator → REAL slice → aggregate + refresh LATEST (dry-run by def
 	$(PYTHON) -m scripts.aggregate_results --outdir "$$RUN_ROOT" $$STREAM_FLAG --emit-status=always
 	$(PYTHON) tools/apply_schema_v1.py "$$RUN_ROOT"
 	$(PYTHON) tools/plot_safe.py --outdir "$$RUN_ROOT"
-        $(PYTHON) -m tools.report.html_report "$$RUN_ROOT"
+	$(PYTHON) -m tools.report.html_report "$$RUN_ROOT"
 	$(PYTHON) tools/latest_run.py "$(RESULTS_DIR)" "$(LATEST_LINK)"
-        if [ -e "$(LATEST_LINK)" ] || [ -L "$(LATEST_LINK)" ]; then
-                $(PYTHON) -m tools.report.html_report "$(LATEST_LINK)"
+	if [ -e "$(LATEST_LINK)" ] || [ -L "$(LATEST_LINK)" ]; then
+		$(PYTHON) -m tools.report.html_report "$(LATEST_LINK)"
 	fi
 	ROWS_WRITTEN="$$(RUN_ID="$$RUN_ID_VALUE" $(PYTHON) - <<-'PY'
 	import os
@@ -374,10 +374,13 @@ list-runs: ## List timestamped results/<RUN_ID> folders and whether CSV/SVG exis
 	        done; \
 	fi
 
+# --- BEGIN: help target ---
 .PHONY: help
-help: ## List common targets and brief docs
-	@echo "DoomArena-Lab — common targets:"; \
-	grep -E '^[a-zA-Z0-9_-]+:.*?## ' $(firstword $(MAKEFILE_LIST)) | sed 's/:.*## / — /' | sort
+help:
+	@printf "\nDoomArena-Lab — available targets\n\n"
+	@awk 'BEGIN {FS=":.*##"; printf "%-28s %s\n", "Target", "Description"; print "---------------------------- --------------------------------"} /^[a-zA-Z0-9_\/%-]+:.*##/ {printf "%-28s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@printf "\nTip: targets with comments like \`target: ## description\` are listed above.\n\n"
+# --- END: help target ---
 
 .PHONY: vars
 vars: ## Print effective overridable variables
