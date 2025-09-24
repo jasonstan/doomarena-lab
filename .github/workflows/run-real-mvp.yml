@@ -71,12 +71,12 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements-ci.txt
 
+      - name: Pre-flight config validation
+        run: python tools/ci_preflight.py
+
       - name: Set RUN_ID
         shell: bash
         run: echo "RUN_ID=$(date -u +'%Y-%m-%dT%H-%M-%SZ')" >> $GITHUB_ENV
-
-      - name: Pre-flight checks (imports only)
-        run: python tools/ci_preflight.py
 
       - name: Show Python and dep versions
         shell: bash

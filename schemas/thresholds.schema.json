@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://doomarena.dev/schemas/thresholds.schema.json",
+  "title": "Threshold configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "min_total_trials",
+    "min_callable_trials",
+    "min_pass_rate"
+  ],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Schema version"
+    },
+    "min_total_trials": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Minimum total number of trials required for a run"
+    },
+    "min_callable_trials": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Minimum number of callable trials required for a run"
+    },
+    "min_pass_rate": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Minimum acceptable pass rate (0-1 inclusive)"
+    },
+    "max_post_deny": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Maximum number of post-call denies allowed"
+    },
+    "policy": {
+      "type": "string",
+      "enum": [
+        "allow",
+        "warn",
+        "strict"
+      ],
+      "description": "How to treat threshold violations"
+    },
+    "notes": {
+      "type": "string",
+      "description": "Free-form notes about the threshold policy"
+    }
+  }
+}

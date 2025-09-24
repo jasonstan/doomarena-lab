@@ -1,0 +1,218 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://doomarena.dev/schemas/evaluator.schema.json",
+  "title": "Evaluator policy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "rules"
+  ],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Schema version"
+    },
+    "rules": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/rule"
+      }
+    }
+  },
+  "$defs": {
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "stringOrStringArray": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        }
+      ]
+    },
+    "simpleValue": {
+      "oneOf": [
+        {
+          "type": ["string", "number", "integer", "boolean"]
+        },
+        {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": ["string", "number", "integer", "boolean"]
+          }
+        }
+      ]
+    },
+    "condition": {
+      "oneOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": ["string", "number", "integer"]
+        },
+        {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/condition"
+          }
+        },
+        {
+          "type": "object",
+          "minProperties": 1,
+          "properties": {
+            "all": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/condition"
+              }
+            },
+            "any": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/condition"
+              }
+            },
+            "not": {
+              "$ref": "#/$defs/condition"
+            },
+            "field": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "op": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "value": {},
+            "value_from": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "context": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "one_of": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/simpleValue"
+              }
+            },
+            "text_contains": {
+              "$ref": "#/$defs/stringOrStringArray"
+            },
+            "text_not_contains": {
+              "$ref": "#/$defs/stringOrStringArray"
+            },
+            "text_regex": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "regex": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "reason_code": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "message": {
+              "$ref": "#/$defs/nonEmptyString"
+            }
+          },
+          "patternProperties": {
+            "^(?!(all|any|not|field|op|value|value_from|context|one_of|text_contains|text_not_contains|text_regex|regex|reason_code|message)$)[A-Za-z0-9_.-]+$": {
+              "$ref": "#/$defs/simpleValue"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "amountRule": {
+      "oneOf": [
+        {
+          "type": ["number", "integer"]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "limit": {
+              "type": ["number", "integer"]
+            },
+            "limit_reason": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "approval_threshold": {
+              "type": ["number", "integer"]
+            },
+            "approval_terms": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/nonEmptyString"
+                },
+                {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "$ref": "#/$defs/nonEmptyString"
+                  }
+                }
+              ]
+            },
+            "approval_reason": {
+              "$ref": "#/$defs/nonEmptyString"
+            }
+          }
+        }
+      ]
+    },
+    "rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "applies_if",
+        "success_if"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "applies_if": {
+          "$ref": "#/$defs/condition"
+        },
+        "success_if": {
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "properties": {
+            "contains_any": {
+              "$ref": "#/$defs/stringOrStringArray"
+            },
+            "forbids_any": {
+              "$ref": "#/$defs/stringOrStringArray"
+            },
+            "denies_if_amount_gt": {
+              "$ref": "#/$defs/amountRule"
+            },
+            "requires_approval_if_amount_gt": {
+              "$ref": "#/$defs/amountRule"
+            }
+          }
+        }
+      }
+    }
+  }
+}

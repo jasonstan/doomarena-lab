@@ -9,7 +9,7 @@
 #   RUN_ID  ?= (timestamp default)     # results/<RUN_ID>; persisted via results/.run_id
 # ------------------------------------------------------------------------------
 
-.PHONY: venv install test run sweep aggregate report scaffold check-schema plot notes sweep3 real1 xrun xsweep xsweep-all topn demo test-unit ci latest tidy-run open-artifacts open-report list-runs journal install-tau help vars check-thresholds mvp
+.PHONY: venv install test run sweep aggregate report scaffold check-schema plot notes sweep3 real1 xrun xsweep xsweep-all topn demo test-unit ci latest tidy-run open-artifacts open-report list-runs journal install-tau help vars check-thresholds mvp validate
 
 SHELL := /bin/bash
 
@@ -68,7 +68,7 @@ venv: ## Create local virtualenv in .venv
 	$(PY) -m pip install -U pip
 
 install: venv ## Install runtime + dev deps into .venv
-	$(PIP) install -U doomarena doomarena-taubench pytest pyyaml pandas matplotlib
+	$(PIP) install -U doomarena doomarena-taubench pytest pyyaml jsonschema pandas matplotlib
 	$(PY) scripts/ensure_tau_bench.py || (echo "tau_bench unavailable; continuing without real τ-Bench" && exit 0)
 
 check-schema: venv
@@ -382,3 +382,7 @@ vars: ## Print effective overridable variables
 	echo "MODE=$(MODE)"; \
 	echo "RUN_ID=$(RUN_ID)"; \
 	echo "RESULTS_DIR=$(RESULTS_DIR)"
+validate: ## Validate configuration files (YAML → JSON Schema)
+	@if [ -x "$(PY)" ]; then PYBIN="$(PY)"; else PYBIN="$(PYTHON)"; fi; \
+	"$$PYBIN" tools/ci_preflight.py
+
