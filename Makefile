@@ -45,6 +45,7 @@ endif
 RUN_DIR := $(RESULTS_DIR)/$(RUN_ID)
 
 LATEST_STRICT ?= 0
+STREAM ?= 0
 
 TRIALS_ARG :=
 TRIALS_OVERRIDE :=
@@ -274,6 +275,11 @@ mvp: ## Translator → REAL slice → aggregate + refresh LATEST (dry-run by def
 	case "$$DRY_RAW" in
 	1|true|TRUE|True|yes|YES|on|ON) DRY_FLAG="--dry-run"; DRY_CANON="1" ;;
 	esac
+	STREAM_RAW="$${STREAM:-0}"
+	STREAM_FLAG=""
+	case "$$STREAM_RAW" in
+	1|true|TRUE|True|yes|YES|on|ON) STREAM_FLAG="--stream" ;;
+	esac
 	export MODEL="$$MODEL_VALUE" TRIALS="$$TRIALS_VALUE" SEED="$$SEED_VALUE" DRY_RUN="$$DRY_RAW" RUN_ID="$$RUN_ID_VALUE"
 	if [ "$$DRY_CANON" = "1" ] && [ -z "$${GROQ_API_KEY:-}" ]; then
 		export GROQ_API_KEY="stub-dry-run-key"
@@ -305,7 +311,7 @@ mvp: ## Translator → REAL slice → aggregate + refresh LATEST (dry-run by def
 	$(PYTHON) -m scripts.experiments.tau_risky_real --model "$$MODEL_VALUE" --trials "$$TRIALS_VALUE" --seed "$$SEED_VALUE" $$DRY_FLAG
 	RUN_ROOT="$(RESULTS_DIR)/$$RUN_ID_VALUE"
 	echo "== Aggregating results in $$RUN_ROOT =="
-	$(PYTHON) -m scripts.aggregate_results --outdir "$$RUN_ROOT" --emit-status=always
+	$(PYTHON) -m scripts.aggregate_results --outdir "$$RUN_ROOT" $$STREAM_FLAG --emit-status=always
 	$(PYTHON) tools/apply_schema_v1.py "$$RUN_ROOT"
 	$(PYTHON) tools/plot_safe.py --outdir "$$RUN_ROOT"
 	$(PYTHON) tools/mk_report.py "$$RUN_ROOT"
@@ -358,15 +364,15 @@ list-runs: ## List timestamped results/<RUN_ID> folders and whether CSV/SVG exis
 		printf "No runs found in %s\n" "$(RESULTS_DIR)"; \
 	else \
 		printf "%-35s  %-3s  %-3s  %-5s %s\n" "RUN_DIR" "CSV" "SVG" "NOTES" "SIZE"; \
-                find "$(RESULTS_DIR)" -mindepth 1 -maxdepth 1 -type d -name "20*" | sort | while read -r d; do \
-                        test -f "$$d/summary.csv" && c=✓ || c=×; \
-                        test -f "$$d/summary.svg" && s=✓ || s=×; \
-                        test -f "$$d/notes.md" && n=✓ || n=×; \
-                        sz=$$(du -sh "$$d" 2>/dev/null | cut -f1); \
-                        [ -n "$$sz" ] || sz=-; \
-                        printf "%-35s  %-3s  %-3s  %-5s %s\n" "$${d#$(RESULTS_DIR)/}" "$$c" "$$s" "$$n" "$$sz"; \
-                done; \
-        fi
+	        find "$(RESULTS_DIR)" -mindepth 1 -maxdepth 1 -type d -name "20*" | sort | while read -r d; do \
+	                test -f "$$d/summary.csv" && c=✓ || c=×; \
+	                test -f "$$d/summary.svg" && s=✓ || s=×; \
+	                test -f "$$d/notes.md" && n=✓ || n=×; \
+	                sz=$$(du -sh "$$d" 2>/dev/null | cut -f1); \
+	                [ -n "$$sz" ] || sz=-; \
+	                printf "%-35s  %-3s  %-3s  %-5s %s\n" "$${d#$(RESULTS_DIR)/}" "$$c" "$$s" "$$n" "$$sz"; \
+	        done; \
+	fi
 
 .PHONY: help
 help: ## List common targets and brief docs
