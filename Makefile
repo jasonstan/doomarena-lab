@@ -186,10 +186,10 @@ report: aggregate plot notes latest ## Publish artifacts to results/ and refresh
 	cp -f "$(RUN_DIR)/run.json" $(RESULTS_DIR)/run.json 2>/dev/null || true
 	cp -f "$(RUN_DIR)/run_report.json" $(RESULTS_DIR)/run_report.json 2>/dev/null || true
 	# Generate per-run HTML report + mirror to LATEST
-        python -m tools.report.html_report "$(RUN_DIR)"
-        if [ -e "$(RESULTS_DIR)/LATEST" ] || [ -L "$(RESULTS_DIR)/LATEST" ] || [ -f "$(RESULTS_DIR)/LATEST.path" ]; then \
-                python -m tools.report.html_report "$(RESULTS_DIR)/LATEST"; \
-        fi
+	python -m tools.report.html_report "$(RUN_DIR)"
+	if [ -e "$(RESULTS_DIR)/LATEST" ] || [ -L "$(RESULTS_DIR)/LATEST" ] || [ -f "$(RESULTS_DIR)/LATEST.path" ]; then \
+		python -m tools.report.html_report "$(RESULTS_DIR)/LATEST"; \
+	fi
 	rm -f $(RUN_CURRENT)
 	if [ -x "$(PY)" ]; then \
 	"$(PY)" scripts/update_readme_results.py; \
