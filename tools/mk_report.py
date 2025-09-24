@@ -2,23 +2,34 @@ import csv
 import html
 import json
 import sys
+from itertools import chain
 from pathlib import Path
 from string import Template
+from typing import Iterable, Iterator
 
 
 TEMPLATE_PATH = Path(__file__).resolve().parent.parent / "reports" / "templates" / "index.html"
 REPORT_JSON_NAME = "run_report.json"
 
 
-def read_rows(csv_path: Path) -> list[dict[str, str]]:
-    rows: list[dict[str, str]] = []
+def read_rows(csv_path: Path) -> tuple[list[str], Iterable[dict[str, str]]]:
     if not csv_path.exists():
-        return rows
-    with csv_path.open(newline="") as handle:
-        reader = csv.DictReader(handle)
-        for record in reader:
-            rows.append({(key or "").strip(): (value or "") for key, value in record.items()})
-    return rows
+        return [], iter(())
+
+    handle = csv_path.open(newline="")
+    reader = csv.DictReader(handle)
+    headers = [(head or "").strip() for head in reader.fieldnames or []]
+
+    def _iter_rows() -> Iterator[dict[str, str]]:
+        try:
+            for record in reader:
+                yield {
+                    (key or "").strip(): (value or "") for key, value in record.items()
+                }
+        finally:
+            handle.close()
+
+    return headers, _iter_rows()
 
 
 def load_run_meta(run_dir: Path) -> dict[str, object]:
@@ -35,15 +46,20 @@ def load_run_meta(run_dir: Path) -> dict[str, object]:
     return payload
 
 
-def build_table(rows: list[dict[str, str]]) -> str:
-    if not rows:
+def build_table(headers: list[str], rows: Iterable[dict[str, str]]) -> str:
+    iterator = iter(rows)
+    try:
+        first_row = next(iterator)
+    except StopIteration:
         return "<p><em>No rows in summary.csv</em></p>"
-    headers = list(rows[0].keys())
-    thead = "".join(f"<th>{html.escape(head)}</th>" for head in headers)
+
+    display_headers = list(headers) if headers else list(first_row.keys())
+    thead = "".join(f"<th>{html.escape(head)}</th>" for head in display_headers)
     body: list[str] = []
-    for record in rows:
+    for record in chain([first_row], iterator):
         cells = "".join(
-            f"<td>{html.escape(str(record.get(head, '')))}</td>" for head in headers
+            f"<td>{html.escape(str(record.get(head, '')))}</td>"
+            for head in display_headers
         )
         body.append(f"<tr>{cells}</tr>")
     return (
@@ -740,8 +756,8 @@ def render_template(context: dict[str, str]) -> str:
 
 def write_report(run_dir: Path) -> None:
     run_dir = resolve_run_dir(run_dir)
-    rows = read_rows(run_dir / "summary.csv")
-    table_html = build_table(rows)
+    headers, rows = read_rows(run_dir / "summary.csv")
+    table_html = build_table(headers, rows)
     meta = load_run_meta(run_dir)
     report = load_run_report(run_dir)
 
