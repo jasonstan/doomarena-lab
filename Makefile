@@ -185,6 +185,7 @@ report: aggregate plot notes latest ## Publish artifacts to results/ and refresh
 	cp -f "$(RUN_DIR)/notes.md" $(RESULTS_DIR)/notes.md 2>/dev/null || true
 	cp -f "$(RUN_DIR)/run.json" $(RESULTS_DIR)/run.json 2>/dev/null || true
 	cp -f "$(RUN_DIR)/run_report.json" $(RESULTS_DIR)/run_report.json 2>/dev/null || true
+	cp -f "$(RUN_DIR)/summary_index.json" $(RESULTS_DIR)/summary_index.json 2>/dev/null || true
 	# Generate per-run HTML report + mirror to LATEST
 	python -m tools.report.html_report "$(RUN_DIR)"
 	if [ -e "$(RESULTS_DIR)/LATEST" ] || [ -L "$(RESULTS_DIR)/LATEST" ] || [ -f "$(RESULTS_DIR)/LATEST.path" ]; then \
