@@ -800,11 +800,36 @@ class _RealRowsStats:
             run_id = self.run_dir.parent.name
         seeds_list = list(self.seeds_ordered)
         run_at = self.run_at or ""
+        config_text = _stringify(self.run_meta.get("config"))
+        if not config_text:
+            fallback: Dict[str, Any] = {}
+            for key in ("exp", "seed", "seeds", "trials", "policy_id"):
+                value = self.run_meta.get(key)
+                if value not in (None, ""):
+                    fallback[key] = value
+            if self.mode:
+                fallback.setdefault("mode", self.mode)
+            model_value = self.model or self.run_meta.get("model")
+            if model_value:
+                fallback.setdefault("model", model_value)
+            evaluator_meta = self.run_meta.get("evaluator")
+            if isinstance(evaluator_meta, dict):
+                path = _stringify(evaluator_meta.get("config_path")).strip()
+                if path:
+                    fallback.setdefault("evaluator_config_path", path)
+            gates_meta = self.run_meta.get("gates")
+            if isinstance(gates_meta, dict):
+                path = _stringify(gates_meta.get("config_path")).strip()
+                if path:
+                    fallback.setdefault("gates_config_path", path)
+            if fallback:
+                config_text = json.dumps(fallback, ensure_ascii=False, sort_keys=True)
+
         header: Dict[str, Any] = {
             "event": "header",
             "exp": exp_name,
             "exp_id": f"{exp_name}:{run_id}" if run_id else exp_name,
-            "config": _stringify(self.run_meta.get("config")),
+            "config": config_text,
             "cfg_hash": _stringify(self.run_meta.get("cfg_hash")),
             "mode": self.mode or "REAL",
             "seed": seeds_list[0] if seeds_list else None,
