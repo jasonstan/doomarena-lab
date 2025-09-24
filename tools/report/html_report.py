@@ -5,45 +5,53 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import sys
 from pathlib import Path
-from typing import Any, Mapping, MutableMapping
+from typing import Any, Mapping
 
 from tools import mk_report
 
 
-def _to_int(value: object) -> int:
-    """Best-effort conversion to ``int`` (fallback to ``0``)."""
+def _as_int(value: object) -> int | None:
+    """Best-effort conversion to ``int`` returning ``None`` on failure."""
 
     if value is None:
-        return 0
+        return None
     if isinstance(value, bool):
         return int(value)
     if isinstance(value, (int, float)):
         try:
             return int(value)
         except (TypeError, ValueError):
-            return 0
+            return None
     text = str(value).strip()
     if not text:
-        return 0
+        return None
     try:
         return int(text)
     except ValueError:
         try:
             return int(float(text))
         except ValueError:
-            return 0
+            return None
 
 
-def _order_reasons(counts: Mapping[str, Any]) -> list[list[Any]]:
+def _csv_truthy(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    text = str(value or "").strip().lower()
+    return text in {"true", "1", "yes", "y", "on"}
+
+
+def _order_reasons(counts: Mapping[str, int]) -> list[list[Any]]:
     items: list[list[Any]] = []
     for key, value in counts.items():
         key_text = str(key).strip()
         if not key_text:
             continue
-        count = _to_int(value)
-        if count <= 0:
+        count = _as_int(value)
+        if count is None or count <= 0:
             continue
         items.append([key_text, count])
     items.sort(key=lambda pair: (-pair[1], pair[0]))
@@ -67,61 +75,99 @@ def _summary_index_from_csv(run_dir: Path) -> dict[str, Any] | None:
     csv_path = run_dir / "summary.csv"
     if not csv_path.exists():
         return None
+
     try:
         with csv_path.open(newline="", encoding="utf-8") as handle:
             reader = csv.DictReader(handle)
-            rows = list(reader)
+            totals = 0
+            callable_cnt = 0
+            pass_cnt = 0
+            fail_cnt = 0
+            top_pre: dict[str, int] = {}
+            top_post: dict[str, int] = {}
+            for row in reader:
+                totals += 1
+                callable_value = row.get("callable") or row.get("called_trials")
+                success_value = row.get("success") or row.get("passed_trials")
+
+                callable_num = _as_int(callable_value)
+                success_num = _as_int(success_value)
+                if callable_num is not None:
+                    c_total = max(callable_num, 0)
+                    callable_cnt += c_total
+                    if success_num is not None:
+                        s_total = max(min(success_num, c_total), 0)
+                    elif _csv_truthy(success_value):
+                        s_total = c_total
+                    else:
+                        s_total = 0
+                    pass_cnt += s_total
+                    fail_cnt += max(c_total - s_total, 0)
+                elif _csv_truthy(callable_value):
+                    callable_cnt += 1
+                    if success_num is not None:
+                        s_total = 1 if success_num > 0 else 0
+                    elif _csv_truthy(success_value):
+                        s_total = 1
+                    else:
+                        s_total = 0
+                    pass_cnt += s_total
+                    fail_cnt += 1 - s_total
+
+                pre_reason = (
+                    row.get("pre_reason_code")
+                    or row.get("pre_reason")
+                    or row.get("pre_reason_text")
+                    or ""
+                )
+                pre_reason = str(pre_reason).strip()
+                if pre_reason:
+                    top_pre[pre_reason] = top_pre.get(pre_reason, 0) + 1
+
+                post_reason = (
+                    row.get("post_reason_code")
+                    or row.get("post_reason")
+                    or row.get("post_reason_text")
+                    or ""
+                )
+                post_reason = str(post_reason).strip()
+                if post_reason:
+                    top_post[post_reason] = top_post.get(post_reason, 0) + 1
+
     except (OSError, csv.Error):
         return None
-    if not rows:
-        return None
 
-    callable_total = 0
-    passed_total = 0
-    pre_counts: MutableMapping[str, int] = {}
-    post_counts: MutableMapping[str, int] = {}
-    for row in rows:
-        callable_total += _to_int(row.get("callable") or row.get("called_trials"))
-        passed_total += _to_int(row.get("success") or row.get("passed_trials"))
-        pre_reason = str(row.get("pre_reason") or "").strip()
-        if pre_reason:
-            pre_counts[pre_reason] = pre_counts.get(pre_reason, 0) + 1
-        post_reason = str(row.get("post_reason") or "").strip()
-        if post_reason:
-            post_counts[post_reason] = post_counts.get(post_reason, 0) + 1
-
-    fails_total = callable_total - passed_total
-    if fails_total < 0:
-        fails_total = 0
-    pass_rate = passed_total / float(callable_total) if callable_total else 0.0
+    pass_rate = pass_cnt / float(callable_cnt) if callable_cnt else 0.0
 
     return {
         "totals": {
-            "rows": len(rows),
-            "callable": callable_total,
-            "passes": passed_total,
-            "fails": fails_total,
+            "rows": totals,
+            "callable": callable_cnt,
+            "passes": pass_cnt,
+            "fails": max(fail_cnt, 0),
         },
         "callable_pass_rate": pass_rate,
         "top_reasons": {
-            "pre": _order_reasons(pre_counts),
-            "post": _order_reasons(post_counts),
+            "pre": _order_reasons(top_pre),
+            "post": _order_reasons(top_post),
         },
         "malformed": 0,
     }
 
 
-def _ensure_summary_index(
-    run_dir: Path, summary_index: Mapping[str, Any] | None
+def load_summary_index(
+    run_dir: Path, summary_index: Mapping[str, Any] | None = None
 ) -> tuple[dict[str, Any], bool]:
     if summary_index is not None:
         return dict(summary_index), False
 
-    file_payload = _load_summary_index_file(run_dir)
+    resolved = Path(os.fspath(run_dir))
+
+    file_payload = _load_summary_index_file(resolved)
     if file_payload is not None:
         return file_payload, False
 
-    csv_payload = _summary_index_from_csv(run_dir)
+    csv_payload = _summary_index_from_csv(resolved)
     if csv_payload is not None:
         return csv_payload, True
 
@@ -144,7 +190,7 @@ def write_html_report(
     """
 
     resolved_dir = mk_report.resolve_run_dir(run_dir)
-    _payload, used_fallback = _ensure_summary_index(resolved_dir, summary_index)
+    _payload, used_fallback = load_summary_index(resolved_dir, summary_index)
     if used_fallback:
         print(
             f"NOTE: summary_index.json missing for {resolved_dir}; using fallback data.",
