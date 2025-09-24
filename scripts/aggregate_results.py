@@ -689,6 +689,23 @@ def _parse_config_blob(text: str) -> Optional[Mapping[str, Any]]:
     return None
 
 
+def _top_reason_counts_for_summary(counter: Mapping[str, Any]) -> List[Tuple[str, int]]:
+    ordered: List[Tuple[str, int]] = []
+    for reason, value in counter.items():
+        reason_text = _stringify(reason).strip()
+        if not reason_text:
+            continue
+        try:
+            count = int(value)
+        except (TypeError, ValueError):
+            continue
+        if count <= 0:
+            continue
+        ordered.append((reason_text, count))
+    ordered.sort(key=lambda item: (-item[1], item[0]))
+    return ordered[:10]
+
+
 @dataclass
 class _RealRowsStats:
     run_dir: Path
@@ -1658,13 +1675,23 @@ def main() -> int:
         status_payload["detail"] = empty_reason
 
     write_run_report(base_dir, run_metrics, status_payload)
+    top_pre = _top_reason_counts_for_summary(run_metrics.pre_reason_counts)
+    top_post = _top_reason_counts_for_summary(run_metrics.post_reason_counts)
+    totals = int(run_metrics.total_trials)
+    callable_cnt = int(run_metrics.callable_trials)
+    pass_cnt = int(run_metrics.passed_trials)
+    fail_cnt = callable_cnt - pass_cnt
+    if fail_cnt < 0:
+        fail_cnt = 0
+    malformed_cnt = int(run_metrics.malformed_rows)
     summary_index = build_summary_index_payload(
-        total_rows=run_metrics.total_trials,
-        callable_trials=run_metrics.callable_trials,
-        passed_trials=run_metrics.passed_trials,
-        malformed_rows=run_metrics.malformed_rows,
-        pre_reason_counts=run_metrics.pre_reason_counts,
-        post_reason_counts=run_metrics.post_reason_counts,
+        totals,
+        callable_cnt,
+        pass_cnt,
+        fail_cnt,
+        top_pre,
+        top_post,
+        malformed_cnt,
     )
     write_summary_index(str(base_dir), summary_index)
 
