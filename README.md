@@ -42,12 +42,14 @@
 
 ## Quickstart
 ```bash
-pip install -r requirements-ci.txt   # or: make install
+pip install -r requirements-ci.txt   # includes PyYAML==6.0.2 (or: make install)
 cp .env.example .env                 # edit to add GROQ_API_KEY for real calls
 make mvp                             # translator → run → aggregate (dry run by default)
 make open-report                     # opens results/LATEST/index.html
 # Real provider calls: set DRY_RUN=0 in .env or run `DRY_RUN=0 make mvp`
 ```
+
+`requirements.txt` mirrors the runtime subset (including `PyYAML==6.0.2`) if you prefer a lighter install without the test extras.
 
 ## Validate configs
 - `make validate` (or `python tools/ci_preflight.py`) checks configs against the JSON Schemas in [`schemas/`](schemas/).
