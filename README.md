@@ -49,6 +49,11 @@ make open-report                     # opens results/LATEST/index.html
 # Real provider calls: set DRY_RUN=0 in .env or run `DRY_RUN=0 make mvp`
 ```
 
+## Validate configs
+- `make validate` (or `python tools/ci_preflight.py`) checks configs against the JSON Schemas in [`schemas/`](schemas/).
+- It validates `thresholds.yaml`, `specs/threat_model.yaml`, `policies/evaluator.yaml`, and `policies/gates.yaml`; missing optional files print `not found (skipped)`.
+- Error messages include JSONPath-style pointers (e.g. `$.rules[0].id`) so you can jump straight to the failing field.
+
 ## Why this exists
 - Enable **fast iteration** with **CI-friendly artifacts** you can attach to PRs.
 - Provide **SHIM** simulation adapters for deterministic demos and a **REAL** path to cloud models.

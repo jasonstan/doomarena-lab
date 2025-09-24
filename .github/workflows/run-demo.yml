@@ -39,6 +39,15 @@ jobs:
         shell: bash
         run: make install
 
+      - name: Pre-flight config validation
+        shell: bash
+        run: |
+          PYBIN=".venv/bin/python"
+          if [ ! -x "$PYBIN" ]; then
+            PYBIN="python"
+          fi
+          "$PYBIN" tools/ci_preflight.py
+
       - name: Run demo (single RUN_ID with both experiments)
         env:
           TRIALS: ${{ inputs.trials }}
