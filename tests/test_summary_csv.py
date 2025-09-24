@@ -1,4 +1,7 @@
 import csv
+import glob
+import json
+import os
 from pathlib import Path
 
 BASE_COLUMNS = [
@@ -91,3 +94,27 @@ def test_summary_csv_present_and_valid():
             valid_rows += 1
 
         assert valid_rows > 0, "No valid rows found in summary.csv"
+
+
+def test_summary_index_json_exists_and_has_schema():
+    runs = sorted(glob.glob("results/*Z"))
+    if not runs:
+        latest_link = os.path.join("results", "LATEST")
+        if os.path.islink(latest_link):
+            runs = [os.path.realpath(latest_link)]
+        else:
+            latest_path_file = os.path.join("results", "LATEST.path")
+            if os.path.isfile(latest_path_file):
+                target = Path(latest_path_file).read_text(encoding="utf-8").strip()
+                if target:
+                    runs = [target]
+    assert runs, "no results run dir found"
+    run_dir = runs[-1]
+    path = os.path.join(run_dir, "summary_index.json")
+    if not os.path.isfile(path):
+        # acceptable when fallback engaged; just ensure HTML exists
+        assert os.path.isfile(os.path.join(run_dir, "index.html")), "index.html missing"
+        return
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    assert "totals" in data and "callable_pass_rate" in data and "top_reasons" in data

@@ -1,17 +1,34 @@
 """Streaming helpers for DoomArena aggregators."""
+
+# --- summary-index helpers (stable schema) ---
 from __future__ import annotations
-
-import json
-import os
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Any, Callable, Dict, Iterator, Mapping
+import json, os
+from typing import Dict, List, Tuple
 
 
-def write_summary_index(run_dir: str, index: dict) -> None:
+def build_summary_index_payload(
+    totals:int, callable_cnt:int, pass_cnt:int, fail_cnt:int,
+    top_pre:List[Tuple[str,int]], top_post:List[Tuple[str,int]],
+    malformed_cnt:int = 0
+) -> Dict:
+    return {
+        "totals": {"rows": totals, "callable": callable_cnt, "passes": pass_cnt, "fails": fail_cnt},
+        "callable_pass_rate": (pass_cnt / callable_cnt) if callable_cnt else 0.0,
+        "top_reasons": {"pre": top_pre, "post": top_post},
+        "malformed": malformed_cnt,
+    }
+
+
+def write_summary_index(run_dir:str, payload:Dict) -> str:
     p = os.path.join(run_dir, "summary_index.json")
     with open(p, "w", encoding="utf-8") as f:
-        json.dump(index, f, ensure_ascii=False, separators=(",", ":"))
+        json.dump(payload, f, ensure_ascii=False, separators=(",", ":"))
+    return p
+
+
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Callable, Iterator
 
 
 @dataclass
@@ -51,69 +68,6 @@ class StreamAggregateResult:
     @property
     def summary(self) -> Dict[str, Any]:
         return self.stats.build_summary()
-
-
-def _ordered_reason_counts(counts: Mapping[str, Any]) -> list[list[Any]]:
-    """Normalise and order reason counts for the summary index payload."""
-
-    ordered: list[list[Any]] = []
-    for key, value in counts.items():
-        if not key:
-            continue
-        try:
-            count = int(value)
-        except (TypeError, ValueError):
-            continue
-        if count <= 0:
-            continue
-        ordered.append([str(key), count])
-    ordered.sort(key=lambda item: (-item[1], item[0]))
-    return ordered
-
-
-def build_summary_index_payload(
-    *,
-    total_rows: int,
-    callable_trials: int,
-    passed_trials: int,
-    malformed_rows: int,
-    pre_reason_counts: Mapping[str, Any],
-    post_reason_counts: Mapping[str, Any],
-) -> Dict[str, Any]:
-    """Build the payload for ``summary_index.json``.
-
-    The structure follows the expected schema used by the HTML report layer and
-    is shared between streaming and non-stream aggregations.
-    """
-
-    callable_total = max(int(callable_trials), 0)
-    passed_total = max(int(passed_trials), 0)
-    total_rows = max(int(total_rows), 0)
-    malformed_rows = max(int(malformed_rows), 0)
-    fails_total = callable_total - passed_total
-    if fails_total < 0:
-        fails_total = 0
-    if callable_total > 0:
-        pass_rate = passed_total / float(callable_total)
-    else:
-        pass_rate = 0.0
-
-    payload = {
-        "totals": {
-            "rows": total_rows,
-            "callable": callable_total,
-            "passes": passed_total,
-            "fails": fails_total,
-        },
-        "callable_pass_rate": pass_rate,
-        "top_reasons": {
-            "pre": _ordered_reason_counts(pre_reason_counts),
-            "post": _ordered_reason_counts(post_reason_counts),
-        },
-        "malformed": malformed_rows,
-    }
-
-    return payload
 
 
 def aggregate_stream(
