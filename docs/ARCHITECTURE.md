@@ -28,6 +28,8 @@ make report ──▶ results/LATEST/ (mirror) + index.html (mini report)
 - `make demo` — quick SHIM runs to populate artifacts.
 - `make xsweep CONFIG=...` — configurable sweep.
 - `make report` — applies schema v1, builds HTML report, refreshes LATEST.
+- `STREAM=1 make ...` — forwards `--stream` to the aggregator to process `rows.jsonl`
+  line-by-line (same outputs, also records `malformed_rows` into `run.json`).
 - `make latest`, `make open-artifacts` — convenience for inspection.
 - CI: **smoke** (tiny SHIM sweep, uploads artifacts) + PR comment with schema + thresholds table.
 

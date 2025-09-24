@@ -19,6 +19,7 @@ if __package__ in (None, ""):
     sys.path.append(str(Path(__file__).resolve().parent.parent))
 from scripts._lib import ensure_dir  # future: read_summary, weighted_asr_by_exp
 from policies.evaluator import Evaluator, EvaluatorConfigError
+from tools.aggregate import aggregate_stream
 
 SUMMARY_COLUMNS: Tuple[str, ...] = (
     "exp_id",
@@ -157,6 +158,7 @@ class RunAggregation:
     encountered_rows_file: bool = False
     calls_attempted_count: int = 0
     calls_made_count: int = 0
+    malformed_rows: int = 0
     prompt_tokens_total: int = 0
     completion_tokens_total: int = 0
     usage_calls_attempted: Optional[int] = None
@@ -411,6 +413,11 @@ class RunAggregation:
         if rel not in self.run_json_paths:
             self.run_json_paths.append(rel)
 
+    def record_malformed(self, count: int) -> None:
+        if count <= 0:
+            return
+        self.malformed_rows += int(count)
+
     def latency_percentiles(self) -> tuple[Optional[int], Optional[int]]:
         if not self.latencies:
             return None, None
@@ -552,6 +559,7 @@ class RunAggregation:
             "policy_ids": sorted(self.policy_ids),
             "encountered_rows_file": self.encountered_rows_file,
             "has_row_data": self.total_trials > 0,
+            "malformed_rows": int(self.malformed_rows),
             "usage": {
                 "trials_total": self.total_trials,
                 "calls_attempted": calls_attempted,
@@ -1434,6 +1442,24 @@ def write_run_report(
     report_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
+def _update_run_json_with_malformed(run_dir: Path, malformed: int) -> None:
+    if malformed < 0:
+        return
+    run_json_path = run_dir / "run.json"
+    if not run_json_path.exists():
+        return
+    try:
+        existing = json.loads(run_json_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        existing = {}
+    if not isinstance(existing, dict):
+        existing = {}
+    existing["malformed_rows"] = int(malformed)
+    temp_path = run_json_path.with_suffix(".tmp")
+    temp_path.write_text(json.dumps(existing, indent=2) + "\n", encoding="utf-8")
+    temp_path.replace(run_json_path)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Aggregate DoomArena run outputs")
     parser.add_argument(
@@ -1454,6 +1480,11 @@ def parse_args() -> argparse.Namespace:
         "--evaluator",
         default=None,
         help="Path to evaluator rules file (default: repo policies/evaluator.yaml)",
+    )
+    parser.add_argument(
+        "--stream",
+        action="store_true",
+        help="Process rows.jsonl using streaming mode (experimental)",
     )
     return parser.parse_args()
 
@@ -1551,11 +1582,37 @@ def main() -> int:
     run_metrics.evaluator_config_path = str(evaluator_path)
     run_metrics.evaluator_rules_total = len(evaluator.rules)
 
+    malformed_by_dir: Dict[Path, int] = {}
+
     for path in jsonl_files:
         try:
             if path.name == "rows.jsonl":
-                header, summary, trial_rows, run_meta = read_real_rows(path)
-                run_metrics.update_from_rows(path=path, rows=trial_rows, run_meta=run_meta)
+                if args.stream:
+                    stream_result = aggregate_stream(
+                        path,
+                        stats_factory=lambda run_dir, run_meta: _RealRowsStats(
+                            run_dir=run_dir, run_meta=run_meta
+                        ),
+                    )
+                    trial_rows = stream_result.rows()
+                    run_meta = stream_result.run_meta
+                    run_metrics.update_from_rows(
+                        path=path, rows=trial_rows, run_meta=run_meta
+                    )
+                    header = stream_result.header
+                    summary = stream_result.summary
+                    malformed_count = stream_result.malformed
+                    run_dir = path.parent
+                    malformed_by_dir[run_dir] = (
+                        malformed_by_dir.get(run_dir, 0) + malformed_count
+                    )
+                else:
+                    header, summary, trial_rows, run_meta = read_real_rows(path)
+                    run_metrics.update_from_rows(
+                        path=path, rows=trial_rows, run_meta=run_meta
+                    )
+                    malformed_count = 0
+                run_metrics.record_malformed(malformed_count)
                 run_metrics.register_run_json_path(path.parent / "run.json")
             else:
                 header, summary = read_jsonl(path)
@@ -1568,6 +1625,10 @@ def main() -> int:
             print(f"Failed to process {path}: {exc}")
             continue
         new_rows.append(row)
+
+    if args.stream and malformed_by_dir:
+        for run_dir, malformed in malformed_by_dir.items():
+            _update_run_json_with_malformed(run_dir, malformed)
 
     run_metrics.register_run_json_path(base_dir / "run.json")
 
