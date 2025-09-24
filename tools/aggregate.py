@@ -2,9 +2,16 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, Mapping
+
+
+def write_summary_index(run_dir: str, index: dict) -> None:
+    p = os.path.join(run_dir, "summary_index.json")
+    with open(p, "w", encoding="utf-8") as f:
+        json.dump(index, f, ensure_ascii=False, separators=(",", ":"))
 
 
 @dataclass
@@ -64,8 +71,7 @@ def _ordered_reason_counts(counts: Mapping[str, Any]) -> list[list[Any]]:
     return ordered
 
 
-def write_summary_index(
-    run_dir: Path,
+def build_summary_index_payload(
     *,
     total_rows: int,
     callable_trials: int,
@@ -73,11 +79,11 @@ def write_summary_index(
     malformed_rows: int,
     pre_reason_counts: Mapping[str, Any],
     post_reason_counts: Mapping[str, Any],
-) -> Path:
-    """Write ``summary_index.json`` for ``run_dir``.
+) -> Dict[str, Any]:
+    """Build the payload for ``summary_index.json``.
 
-    The payload follows the expected schema used by the HTML report layer and is
-    written for both streaming and non-stream aggregations.
+    The structure follows the expected schema used by the HTML report layer and
+    is shared between streaming and non-stream aggregations.
     """
 
     callable_total = max(int(callable_trials), 0)
@@ -107,10 +113,7 @@ def write_summary_index(
         "malformed": malformed_rows,
     }
 
-    output_path = run_dir / "summary_index.json"
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-    return output_path
+    return payload
 
 
 def aggregate_stream(
