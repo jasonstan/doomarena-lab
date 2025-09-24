@@ -178,6 +178,16 @@ Run `make check-thresholds` locally (`STRICT=1 make check-thresholds` to fail). 
 
 ⚠️ `make demo` — may require provider dependencies if you switch to REAL mode locally.
 
+### Large-file smoke (local only)
+Generate a deterministic `rows.jsonl` and run the streaming smoke locally:
+
+```bash
+python tools/gen_rows.py --n 100000 --out /tmp/rows.jsonl
+ENV=LOCAL_SMOKE pytest tests/test_stream_large_local.py -q
+```
+
+The pytest smoke is skipped automatically unless `ENV=LOCAL_SMOKE` is set so CI stays fast.
+
 ## CI
 The smoke workflow runs a tiny SHIM sweep and publishes artifacts. It also updates `results/LATEST` for quick inspection in PRs.
 
@@ -198,8 +208,8 @@ PRs welcome. Keep demos fast and artifacts reproducible. Aim for small, reviewab
 
 | exp | seeds | mode | ASR | trials | successes | git | run_at |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| airline_escalating_v1 | 99 | SHIM | 0.00 (0/2) | 2 | 0 | UNKNOWN | 2025-09-23T20:38:37Z |
-| airline_escalating_v1 | 99 | SHIM | 0.00 (0/2) | 2 | 0 | UNKNOWN | 2025-09-23T20:38:36Z |
+| airline_escalating_v1 | 99 | SHIM | 0.00 (0/2) | 2 | 0 | UNKNOWN | 2025-09-24T18:50:39Z |
+| airline_escalating_v1 | 99 | SHIM | 0.00 (0/2) | 2 | 0 | UNKNOWN | 2025-09-24T18:50:35Z |
 
 <!-- RESULTS:END -->
 
@@ -208,6 +218,6 @@ PRs welcome. Keep demos fast and artifacts reproducible. Aim for small, reviewab
 
 |rank|exp_id|ASR|mode|trials|seeds|commit|run_at|
 |---|---|---|---|---|---|---|---|
-|1|airline_escalating_v1:99|0.000|SHIM|2|99|UNKNOWN|2025-09-23T20:38:37Z|
-|2|airline_escalating_v1:99|0.000|SHIM|2|99|UNKNOWN|2025-09-23T20:38:36Z|
+|1|airline_escalating_v1:99|0.000|SHIM|2|99|UNKNOWN|2025-09-24T18:50:39Z|
+|2|airline_escalating_v1:99|0.000|SHIM|2|99|UNKNOWN|2025-09-24T18:50:35Z|
 <!-- TOPN:END -->
