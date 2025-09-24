@@ -191,6 +191,43 @@ jobs:
           make report RUN_ID="${RUN_ID}"
           make latest
 
+      - name: Inspect REAL report assets
+        env:
+          RUN_ID: ${{ env.RUN_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import os
+          import sys
+
+          run_id = os.environ.get("RUN_ID", "")
+          checks = [
+              ("run index", Path("results") / run_id / "index.html"),
+              ("run summary.svg", Path("results") / run_id / "summary.svg"),
+              ("run summary_index.json", Path("results") / run_id / "summary_index.json"),
+              ("latest index", Path("results") / "LATEST" / "index.html"),
+              ("latest summary.svg", Path("results") / "LATEST" / "summary.svg"),
+              ("latest summary_index.json", Path("results") / "LATEST" / "summary_index.json"),
+          ]
+
+          missing = False
+          for label, path in checks:
+              if path.exists():
+                  size = path.stat().st_size
+                  print(f"{label}: {path} ({size} bytes)")
+                  if size == 0:
+                      print(f"::error::{label} is zero bytes: {path}")
+                      missing = True
+              else:
+                  print(f"{label}: {path} (missing)")
+                  missing = True
+
+          if missing:
+              sys.exit(1)
+          PY
+
       - name: Post-run data sanity
         env:
           EVENT_NAME: ${{ github.event_name }}

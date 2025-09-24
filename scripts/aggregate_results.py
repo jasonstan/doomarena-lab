@@ -19,7 +19,7 @@ if __package__ in (None, ""):
     sys.path.append(str(Path(__file__).resolve().parent.parent))
 from scripts._lib import ensure_dir  # future: read_summary, weighted_asr_by_exp
 from policies.evaluator import Evaluator, EvaluatorConfigError
-from tools.aggregate import aggregate_stream
+from tools.aggregate import aggregate_stream, write_summary_index
 
 SUMMARY_COLUMNS: Tuple[str, ...] = (
     "exp_id",
@@ -1654,6 +1654,15 @@ def main() -> int:
         status_payload["detail"] = empty_reason
 
     write_run_report(base_dir, run_metrics, status_payload)
+    write_summary_index(
+        base_dir,
+        total_rows=run_metrics.total_trials,
+        callable_trials=run_metrics.callable_trials,
+        passed_trials=run_metrics.passed_trials,
+        malformed_rows=run_metrics.malformed_rows,
+        pre_reason_counts=run_metrics.pre_reason_counts,
+        post_reason_counts=run_metrics.post_reason_counts,
+    )
 
     if args.emit_status == "always":
         print(status_message)
