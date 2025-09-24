@@ -1,6 +1,6 @@
 # Dev/test deps (keep light; match Makefile install)
 pytest
-pyyaml
+PyYAML==6.0.2
 requests>=2.31,<3.0
 numpy>=1.26.4,<2.0
 pandas>=2.2.2,<2.3

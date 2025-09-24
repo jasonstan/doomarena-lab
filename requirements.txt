@@ -1,0 +1,2 @@
+# Runtime dependencies for DoomArena-Lab CLI/tools.
+PyYAML==6.0.2

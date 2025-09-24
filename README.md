@@ -49,6 +49,9 @@ make open-report                     # opens results/LATEST/index.html
 # Real provider calls: set DRY_RUN=0 in .env or run `DRY_RUN=0 make mvp`
 ```
 
+The CLI and governance tooling rely on YAML configs and policies, so the setup instructions pin
+`PyYAML==6.0.2`. Install via the requirements files above if you manage environments manually.
+
 ## Why this exists
 - Enable **fast iteration** with **CI-friendly artifacts** you can attach to PRs.
 - Provide **SHIM** simulation adapters for deterministic demos and a **REAL** path to cloud models.

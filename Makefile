@@ -68,7 +68,7 @@ venv: ## Create local virtualenv in .venv
 	$(PY) -m pip install -U pip
 
 install: venv ## Install runtime + dev deps into .venv
-	$(PIP) install -U doomarena doomarena-taubench pytest pyyaml pandas matplotlib
+	$(PIP) install -U doomarena doomarena-taubench pytest PyYAML==6.0.2 pandas matplotlib
 	$(PY) scripts/ensure_tau_bench.py || (echo "tau_bench unavailable; continuing without real τ-Bench" && exit 0)
 
 check-schema: venv
