@@ -7,6 +7,8 @@ from pathlib import Path
 from string import Template
 from typing import Iterable, Iterator
 
+from tools.report.html_report import SummaryIndexView, load_summary_index
+
 
 TEMPLATE_PATH = Path(__file__).resolve().parent.parent / "reports" / "templates" / "index.html"
 REPORT_JSON_NAME = "run_report.json"
@@ -221,12 +223,24 @@ def build_status_banner(report: dict[str, object]) -> str:
     return "<div class='status-banner status-neutral'>No thresholds evaluated.</div>"
 
 
-def build_quick_panels(report: dict[str, object]) -> str:
+def build_quick_panels(
+    report: dict[str, object], summary_index: SummaryIndexView | None = None
+) -> str:
     total = _as_int(report.get("total_trials"), 0)
-    callable_trials = _as_int(report.get("callable_trials"), _as_int(report.get("called_trials"), 0))
+    callable_trials = _as_int(
+        report.get("callable_trials"), _as_int(report.get("called_trials"), 0)
+    )
     pre_denied = _as_int(report.get("pre_denied"), 0)
     passed = _as_int(report.get("passed_trials"), 0)
     pass_rate_display = _pass_rate_display(report)
+    if summary_index and summary_index.loaded:
+        total = summary_index.total("total_trials")
+        callable_trials = summary_index.total("callable_trials")
+        pre_denied = summary_index.total("pre_denied")
+        passed = summary_index.total("passed_trials")
+        override = summary_index.pass_rate_display()
+        if override:
+            pass_rate_display = override
     callable_context = f"Callable trials: {callable_trials}"
     if total and pre_denied:
         callable_context += f" · Pre-denied: {pre_denied}"
@@ -262,11 +276,20 @@ def _format_latency(report: dict[str, object]) -> str:
     return f"{left} / {right}"
 
 
-def build_overview(report: dict[str, object]) -> str:
+def build_overview(
+    report: dict[str, object], summary_index: SummaryIndexView | None = None
+) -> str:
     passed = _as_int(report.get("passed_trials"), 0)
     called = _as_int(report.get("called_trials"), 0)
     total = _as_int(report.get("total_trials"), 0)
     pass_rate_display = _pass_rate_display(report)
+    if summary_index and summary_index.loaded:
+        passed = summary_index.total("passed_trials")
+        called = summary_index.total("callable_trials")
+        total = summary_index.total("total_trials")
+        override = summary_index.pass_rate_display()
+        if override:
+            pass_rate_display = override
     usage = report.get("usage") if isinstance(report.get("usage"), dict) else {}
     budget = report.get("budget") if isinstance(report.get("budget"), dict) else {}
     tokens_total_sum = _as_int(usage.get("tokens_total_sum") if isinstance(usage, dict) else 0,
@@ -287,6 +310,9 @@ def build_overview(report: dict[str, object]) -> str:
     post_text = f"{_as_int(post.get('allow'), 0)}/{_as_int(post.get('warn'), 0)}/{_as_int(post.get('deny'), 0)}"
     post_warn = _as_int(report.get("post_warn"), 0)
     post_deny = _as_int(report.get("post_deny"), 0)
+    if summary_index and summary_index.loaded:
+        post_warn = summary_index.total("post_warn")
+        post_deny = summary_index.total("post_deny")
     top_reason = str(report.get("top_reason") or "-")
     calls_made = _as_int(usage.get("calls_made") if isinstance(usage, dict) else 0, called)
     budget_hit = str((budget.get("budget_hit") if isinstance(budget, dict) else "") or "none")
@@ -482,10 +508,15 @@ def _clean_status_message(kind: str, message: str) -> str:
     return text
 
 
-def build_banners(report: dict[str, object], policy_ids: list[object]) -> str:
+def build_banners(
+    report: dict[str, object], policy_ids: list[object], summary_index: SummaryIndexView | None = None
+) -> str:
     banners: list[str] = []
     total_trials = _as_int(report.get("total_trials"), 0)
     called_trials = _as_int(report.get("called_trials"), 0)
+    if summary_index and summary_index.loaded:
+        total_trials = summary_index.total("total_trials")
+        called_trials = summary_index.total("callable_trials")
     encountered = bool(report.get("encountered_rows_file"))
     has_data = bool(report.get("has_row_data"))
 
@@ -760,6 +791,7 @@ def write_report(run_dir: Path) -> None:
     table_html = build_table(headers, rows)
     meta = load_run_meta(run_dir)
     report = load_run_report(run_dir)
+    summary_index = load_summary_index(run_dir)
 
     schema = html.escape(str(meta.get("summary_schema", ""))) if meta else ""
     results_schema = html.escape(str(meta.get("results_schema", ""))) if meta else ""
@@ -790,12 +822,12 @@ def write_report(run_dir: Path) -> None:
         "HEADER_TITLE": "DoomArena-Lab Run Report",
         "META": meta_html,
         "STATUS_BANNER": build_status_banner(report),
-        "QUICK_PANELS": build_quick_panels(report),
+        "QUICK_PANELS": build_quick_panels(report, summary_index),
         "DATA_LINKS": build_data_links(run_dir, report),
-        "BANNERS": build_banners(report, policy_ids),
+        "BANNERS": build_banners(report, policy_ids, summary_index),
         "THRESHOLD_BADGE": build_threshold_badge(report),
         "OVERVIEW_BADGE": build_overview_badge(report),
-        "OVERVIEW": build_overview(report),
+        "OVERVIEW": build_overview(report, summary_index),
         "EVALUATOR_PANEL": build_evaluator_panel(report),
         "SUMMARY_CHART": svg_tag,
         "SUMMARY_TABLE": table_html,

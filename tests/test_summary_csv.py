@@ -1,4 +1,5 @@
 import csv
+import json
 from pathlib import Path
 
 BASE_COLUMNS = [
@@ -91,3 +92,44 @@ def test_summary_csv_present_and_valid():
             valid_rows += 1
 
         assert valid_rows > 0, "No valid rows found in summary.csv"
+
+    index_path = Path("results/summary_index.json")
+    assert index_path.exists(), "results/summary_index.json is missing"
+
+    payload = json.loads(index_path.read_text(encoding="utf-8"))
+    assert isinstance(payload, dict), "summary_index.json must be a JSON object"
+
+    totals = payload.get("totals")
+    assert isinstance(totals, dict), "totals must be an object"
+    for key in [
+        "total_trials",
+        "callable_trials",
+        "passed_trials",
+        "pre_denied",
+        "post_warn",
+        "post_deny",
+    ]:
+        assert key in totals, f"totals missing {key}"
+        assert isinstance(
+            totals[key], (int, float)
+        ), f"totals.{key} must be numeric"
+
+    rate_value = payload.get("callable_pass_rate")
+    assert isinstance(
+        rate_value, (int, float)
+    ), "callable_pass_rate must be numeric"
+
+    top_reasons = payload.get("top_reasons")
+    assert isinstance(top_reasons, dict), "top_reasons must be an object"
+    for stage in ("pre", "post"):
+        stage_list = top_reasons.get(stage)
+        assert isinstance(stage_list, list), f"top_reasons.{stage} must be a list"
+        for entry in stage_list:
+            assert isinstance(entry, dict), f"{stage} entry must be an object"
+            reason = entry.get("reason")
+            assert isinstance(reason, str) and reason.strip(), "reason must be a string"
+            count = entry.get("count")
+            assert isinstance(count, (int, float)), "count must be numeric"
+
+    malformed_value = payload.get("malformed")
+    assert isinstance(malformed_value, (int, float)), "malformed must be numeric"

@@ -1,0 +1,16 @@
+{
+  "totals": {
+    "total_trials": 0,
+    "callable_trials": 0,
+    "passed_trials": 0,
+    "pre_denied": 0,
+    "post_warn": 0,
+    "post_deny": 0
+  },
+  "callable_pass_rate": 0.0,
+  "top_reasons": {
+    "pre": [],
+    "post": []
+  },
+  "malformed": 0
+}
