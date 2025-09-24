@@ -12,7 +12,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
+from typing import Any, Dict, Iterable, Iterator, List, Mapping, Optional, Tuple
 
 # NOTE: first step toward de-duplication — leverage shared helpers where useful.
 if __package__ in (None, ""):
@@ -677,13 +677,138 @@ def _parse_config_blob(text: str) -> Optional[Mapping[str, Any]]:
     return None
 
 
-def read_real_rows(
-    path: Path,
-) -> Tuple[Dict[str, Any], Dict[str, Any], List[Dict[str, Any]], Dict[str, Any]]:
-    rows: List[Dict[str, Any]] = []
+@dataclass
+class _RealRowsStats:
+    run_dir: Path
+    run_meta: Dict[str, Any]
+    exp_name: Optional[str] = None
+    model: Optional[str] = None
+    run_at: Optional[str] = None
+    mode: str = "REAL"
+    seeds_seen: set[str] = field(default_factory=set)
+    seeds_ordered: List[str] = field(default_factory=list)
+    trials: int = 0
+    successes: int = 0
+    total_tokens: int = 0
+    latency_total: float = 0.0
+    latency_count: int = 0
+    cost_total: float = 0.0
+    cost_present: bool = False
+
+    def __post_init__(self) -> None:
+        exp_candidate = _stringify(self.run_meta.get("exp")).strip()
+        if exp_candidate:
+            self.exp_name = exp_candidate
+        model_candidate = _stringify(self.run_meta.get("model")).strip()
+        if model_candidate:
+            self.model = model_candidate
+        started_text = _stringify(self.run_meta.get("started")).strip()
+        if started_text:
+            self.run_at = started_text
+        mode_candidate = _stringify(self.run_meta.get("mode")).strip()
+        if mode_candidate:
+            self.mode = mode_candidate
+        self._add_seed(self.run_meta.get("seed"))
+        seeds_value = self.run_meta.get("seeds")
+        if isinstance(seeds_value, (list, tuple)):
+            for item in seeds_value:
+                self._add_seed(item)
+        elif seeds_value is not None:
+            self._add_seed(seeds_value)
+
+    def _add_seed(self, value: Any) -> None:
+        text = _stringify(value).strip()
+        if not text or text in self.seeds_seen:
+            return
+        self.seeds_seen.add(text)
+        self.seeds_ordered.append(text)
+
+    def observe_row(self, row: Mapping[str, Any]) -> None:
+        self.trials += 1
+        if bool(row.get("success")):
+            self.successes += 1
+
+        self._add_seed(row.get("seed"))
+
+        if self.exp_name is None:
+            exp_candidate = _stringify(row.get("exp")).strip()
+            if exp_candidate:
+                self.exp_name = exp_candidate
+
+        if self.model is None:
+            model_candidate = _stringify(row.get("model")).strip()
+            if model_candidate:
+                self.model = model_candidate
+
+        if self.run_at is None:
+            timestamp = _stringify(row.get("timestamp")).strip()
+            if timestamp:
+                self.run_at = timestamp
+
+        total_opt = _parse_optional_int(row.get("total_tokens"))
+        if total_opt is None:
+            prompt_opt = _parse_optional_int(row.get("prompt_tokens")) or 0
+            completion_opt = _parse_optional_int(row.get("completion_tokens")) or 0
+            if prompt_opt or completion_opt:
+                total_opt = prompt_opt + completion_opt
+        if total_opt is not None:
+            self.total_tokens += int(total_opt)
+
+        latency_opt = _parse_optional_float(row.get("latency_ms"))
+        if latency_opt is not None:
+            self.latency_total += float(latency_opt)
+            self.latency_count += 1
+
+        cost_opt = _parse_optional_float(row.get("cost_usd"))
+        if cost_opt is not None:
+            self.cost_total += float(cost_opt)
+            self.cost_present = True
+
+    def build_header(self) -> Dict[str, Any]:
+        exp_name = self.exp_name or self.run_dir.name
+        run_id = _stringify(self.run_meta.get("run_id")).strip()
+        if not run_id:
+            run_id = self.run_dir.parent.name
+        seeds_list = list(self.seeds_ordered)
+        run_at = self.run_at or ""
+        header: Dict[str, Any] = {
+            "event": "header",
+            "exp": exp_name,
+            "exp_id": f"{exp_name}:{run_id}" if run_id else exp_name,
+            "config": _stringify(self.run_meta.get("config")),
+            "cfg_hash": _stringify(self.run_meta.get("cfg_hash")),
+            "mode": self.mode or "REAL",
+            "seed": seeds_list[0] if seeds_list else None,
+            "seeds": seeds_list or None,
+            "model": self.model or "",
+            "run_at": run_at,
+            "git_commit": _stringify(self.run_meta.get("git_commit")),
+        }
+        return header
+
+    def build_summary(self) -> Dict[str, Any]:
+        trials = self.trials
+        successes = self.successes
+        avg_latency: Optional[float] = None
+        if self.latency_count > 0:
+            avg_latency = self.latency_total / float(self.latency_count)
+        summary: Dict[str, Any] = {
+            "event": "summary",
+            "trials": trials,
+            "successes": successes,
+            "asr": (successes / trials) if trials else 0.0,
+            "sum_tokens": self.total_tokens,
+            "avg_latency_ms": avg_latency,
+            "sum_cost_usd": self.cost_total if self.cost_present else None,
+            "mode": self.mode or "REAL",
+        }
+        return summary
+
+
+def _iter_json_objects(path: Path) -> Iterator[Dict[str, Any]]:
     with path.open("r", encoding="utf-8") as handle:
-        for line in handle:
-            line = line.strip()
+        for raw_line in handle:
+            line = raw_line.strip()
             if not line:
                 continue
             try:
@@ -691,8 +816,12 @@ def read_real_rows(
             except json.JSONDecodeError:
                 continue
             if isinstance(payload, dict):
-                rows.append(payload)
+                yield payload
 
+
+def read_real_rows(
+    path: Path,
+) -> Tuple[Dict[str, Any], Dict[str, Any], Iterable[Dict[str, Any]], Dict[str, Any]]:
     run_dir = path.parent
     run_meta_path = run_dir / "run.json"
     run_meta: Dict[str, Any] = {}
@@ -705,104 +834,17 @@ def read_real_rows(
         if isinstance(meta_payload, dict):
             run_meta = meta_payload
 
-    run_id = _stringify(run_meta.get("run_id")) or run_dir.parent.name
-    exp_name = _stringify(run_meta.get("exp"))
-    if not exp_name and rows:
-        exp_name = _stringify(rows[0].get("exp"))
-    if not exp_name:
-        exp_name = run_dir.name
-    model = _stringify(run_meta.get("model"))
-    if not model:
-        for row in rows:
-            model = _stringify(row.get("model"))
-            if model:
-                break
+    stats = _RealRowsStats(run_dir=run_dir, run_meta=run_meta)
+    for payload in _iter_json_objects(path):
+        stats.observe_row(payload)
 
-    seeds_seen: set[str] = set()
-    seeds_ordered: List[str] = []
+    header = stats.build_header()
+    summary = stats.build_summary()
 
-    def _add_seed(value: Any) -> None:
-        text = _stringify(value).strip()
-        if not text or text in seeds_seen:
-            return
-        seeds_seen.add(text)
-        seeds_ordered.append(text)
+    def _row_iter() -> Iterator[Dict[str, Any]]:
+        yield from _iter_json_objects(path)
 
-    _add_seed(run_meta.get("seed"))
-    seeds_value = run_meta.get("seeds")
-    if isinstance(seeds_value, (list, tuple)):
-        for item in seeds_value:
-            _add_seed(item)
-    elif seeds_value is not None:
-        _add_seed(seeds_value)
-
-    for row in rows:
-        _add_seed(row.get("seed"))
-
-    trials = len(rows)
-    successes = sum(1 for row in rows if bool(row.get("success")))
-
-    total_tokens = 0
-    latency_values: List[float] = []
-    cost_total = 0.0
-    cost_present = False
-
-    for row in rows:
-        total_opt = _parse_optional_int(row.get("total_tokens"))
-        if total_opt is None:
-            prompt_opt = _parse_optional_int(row.get("prompt_tokens")) or 0
-            completion_opt = _parse_optional_int(row.get("completion_tokens")) or 0
-            if prompt_opt or completion_opt:
-                total_opt = prompt_opt + completion_opt
-        if total_opt is not None:
-            total_tokens += int(total_opt)
-
-        latency_opt = _parse_optional_float(row.get("latency_ms"))
-        if latency_opt is not None:
-            latency_values.append(latency_opt)
-
-        cost_opt = _parse_optional_float(row.get("cost_usd"))
-        if cost_opt is not None:
-            cost_total += cost_opt
-            cost_present = True
-
-    avg_latency: Optional[float] = None
-    if latency_values:
-        avg_latency = sum(latency_values) / float(len(latency_values))
-
-    run_at = _stringify(run_meta.get("started"))
-    if not run_at:
-        for row in rows:
-            run_at = _stringify(row.get("timestamp"))
-            if run_at:
-                break
-
-    header: Dict[str, Any] = {
-        "event": "header",
-        "exp": exp_name,
-        "exp_id": f"{exp_name}:{run_id}" if run_id else exp_name,
-        "config": _stringify(run_meta.get("config")),
-        "cfg_hash": _stringify(run_meta.get("cfg_hash")),
-        "mode": _stringify(run_meta.get("mode")) or "REAL",
-        "seed": seeds_ordered[0] if seeds_ordered else None,
-        "seeds": seeds_ordered or None,
-        "model": model,
-        "run_at": run_at,
-        "git_commit": _stringify(run_meta.get("git_commit")),
-    }
-
-    summary: Dict[str, Any] = {
-        "event": "summary",
-        "trials": trials,
-        "successes": successes,
-        "asr": (successes / trials) if trials else 0.0,
-        "sum_tokens": total_tokens,
-        "avg_latency_ms": avg_latency,
-        "sum_cost_usd": cost_total if cost_present else None,
-        "mode": header["mode"],
-    }
-
-    return header, summary, rows, run_meta
+    return header, summary, _row_iter(), run_meta
 
 
 def _collect_seeds(header: Dict[str, Any]) -> str:
