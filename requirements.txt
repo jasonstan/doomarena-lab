@@ -1,6 +1,5 @@
 doomarena
 doomarena-taubench
-pytest
 PyYAML==6.0.2
 jsonschema>=4.22,<5.0
 requests>=2.31,<3.0
