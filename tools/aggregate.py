@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterator
+from typing import Any, Callable, Dict, Iterator, Mapping
 
 
 @dataclass
@@ -44,6 +44,73 @@ class StreamAggregateResult:
     @property
     def summary(self) -> Dict[str, Any]:
         return self.stats.build_summary()
+
+
+def _ordered_reason_counts(counts: Mapping[str, Any]) -> list[list[Any]]:
+    """Normalise and order reason counts for the summary index payload."""
+
+    ordered: list[list[Any]] = []
+    for key, value in counts.items():
+        if not key:
+            continue
+        try:
+            count = int(value)
+        except (TypeError, ValueError):
+            continue
+        if count <= 0:
+            continue
+        ordered.append([str(key), count])
+    ordered.sort(key=lambda item: (-item[1], item[0]))
+    return ordered
+
+
+def write_summary_index(
+    run_dir: Path,
+    *,
+    total_rows: int,
+    callable_trials: int,
+    passed_trials: int,
+    malformed_rows: int,
+    pre_reason_counts: Mapping[str, Any],
+    post_reason_counts: Mapping[str, Any],
+) -> Path:
+    """Write ``summary_index.json`` for ``run_dir``.
+
+    The payload follows the expected schema used by the HTML report layer and is
+    written for both streaming and non-stream aggregations.
+    """
+
+    callable_total = max(int(callable_trials), 0)
+    passed_total = max(int(passed_trials), 0)
+    total_rows = max(int(total_rows), 0)
+    malformed_rows = max(int(malformed_rows), 0)
+    fails_total = callable_total - passed_total
+    if fails_total < 0:
+        fails_total = 0
+    if callable_total > 0:
+        pass_rate = passed_total / float(callable_total)
+    else:
+        pass_rate = 0.0
+
+    payload = {
+        "totals": {
+            "rows": total_rows,
+            "callable": callable_total,
+            "passes": passed_total,
+            "fails": fails_total,
+        },
+        "callable_pass_rate": pass_rate,
+        "top_reasons": {
+            "pre": _ordered_reason_counts(pre_reason_counts),
+            "post": _ordered_reason_counts(post_reason_counts),
+        },
+        "malformed": malformed_rows,
+    }
+
+    output_path = run_dir / "summary_index.json"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    return output_path
 
 
 def aggregate_stream(
