@@ -21,17 +21,34 @@ def load_summary_index(run_dir: str):
         csv_path = os.path.join(run_dir, "summary.csv")
         totals = callable_cnt = pass_cnt = fail_cnt = 0
         pre_counts, post_counts = {}, {}
+
+        def _as_int(value: Any) -> int:
+            if value is None:
+                return 0
+            if isinstance(value, (int, float)):
+                return int(value)
+            text = str(value).strip()
+            if not text:
+                return 0
+            try:
+                return int(text)
+            except ValueError:
+                try:
+                    return int(float(text))
+                except ValueError:
+                    return 0
+
         if os.path.isfile(csv_path):
             with open(csv_path, newline="", encoding="utf-8") as f:
                 r = csv.DictReader(f)
                 for row in r:
                     totals += 1
-                    if (row.get("callable") or "").lower() == "true":
-                        callable_cnt += 1
-                        if (row.get("success") or "").lower() == "true":
-                            pass_cnt += 1
-                        else:
-                            fail_cnt += 1
+                    callable_trials = _as_int(row.get("callable"))
+                    successful_trials = _as_int(row.get("success"))
+                    if callable_trials:
+                        callable_cnt += callable_trials
+                        pass_cnt += successful_trials
+                        fail_cnt += max(callable_trials - successful_trials, 0)
                     pre = row.get("pre_reason_code") or ""
                     post = row.get("post_reason_code") or ""
                     if pre: pre_counts[pre] = pre_counts.get(pre, 0) + 1
