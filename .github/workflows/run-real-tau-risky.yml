@@ -128,6 +128,22 @@ jobs:
           make report RUN_ID="${RUN_ID}"
           make latest
 
+      - name: Verify REAL artifacts
+        env:
+          RUN_ID: ${{ env.RUN_ID }}
+        run: |
+          set -euxo pipefail
+          echo "RUN_ID=${RUN_ID}"
+          RUN_DIR="results/${RUN_ID}"
+          test -s "${RUN_DIR}/index.html"
+          test -s "${RUN_DIR}/summary.svg"
+          test -s "${RUN_DIR}/summary.csv"
+          if [ -f "${RUN_DIR}/summary_index.json" ]; then
+            ls -l "${RUN_DIR}/summary_index.json"
+          else
+            echo "NOTE: summary_index.json not found (fallback path)"
+          fi
+
       - name: Post-run data sanity
         env:
           EVENT_NAME: ${{ github.event_name }}
@@ -172,21 +188,16 @@ jobs:
         with:
           name: real-tau-risky-${{ env.RUN_ID || 'current' }}
           path: |
-            results/${{ env.RUN_ID }}/
-            results/.run_id
+            results/${{ env.RUN_ID }}/**
           if-no-files-found: error
           retention-days: 7
 
       - name: Upload latest artifacts
-        if: always()
+        if: ${{ always() && hashFiles('results/LATEST/index.html') != '' }}
         uses: actions/upload-artifact@v4
         with:
           name: latest-artifacts
           path: |
-            results/LATEST/summary.csv
-            results/LATEST/summary.svg
-            results/LATEST/summary.md
-            results/LATEST/index.html
-            results/LATEST/run.json
+            results/LATEST/**
           if-no-files-found: warn
           retention-days: 7
