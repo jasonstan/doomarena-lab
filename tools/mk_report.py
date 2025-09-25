@@ -1,3 +1,4 @@
+import ast
 import csv
 import html
 import json
@@ -5,7 +6,7 @@ import sys
 from itertools import chain
 from pathlib import Path
 from string import Template
-from typing import Iterable, Iterator
+from typing import Iterable, Iterator, Mapping
 
 
 TEMPLATE_PATH = Path(__file__).resolve().parent.parent / "reports" / "templates" / "index.html"
@@ -44,6 +45,521 @@ def load_run_meta(run_dir: Path) -> dict[str, object]:
     if isinstance(data, dict):
         payload = data
     return payload
+
+
+def _load_chart_css() -> str:
+    css_path = Path(__file__).resolve().parent / "report" / "assets" / "chart.css"
+    try:
+        text = css_path.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    stripped = text.strip()
+    if not stripped:
+        return ""
+    return stripped + "\n"
+
+
+def _normalise_text(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    return str(value).strip()
+
+
+def _parse_config_blob(blob: object) -> dict[str, object]:
+    if blob is None:
+        return {}
+    if isinstance(blob, dict):
+        return blob
+    text = _normalise_text(blob)
+    if not text:
+        return {}
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        try:
+            parsed = ast.literal_eval(text)
+        except Exception:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+
+
+def _first_nonempty(values: list[str]) -> str:
+    for value in values:
+        if value:
+            return value
+    return ""
+
+
+def _collect_seed_badges(meta: Mapping[str, object], summary_snapshot: Mapping[str, str]) -> str:
+    seeds: list[str] = []
+    seen: set[str] = set()
+
+    def _add(value: object) -> None:
+        if value is None:
+            return
+        if isinstance(value, (list, tuple, set)):
+            for item in value:
+                _add(item)
+            return
+        text = _normalise_text(value)
+        if not text:
+            return
+        # split comma/semicolon separated strings
+        for token in [chunk.strip() for chunk in text.replace(";", ",").split(",")]:
+            if not token:
+                continue
+            if token in seen:
+                continue
+            seen.add(token)
+            seeds.append(token)
+
+    _add(meta.get("seed"))
+    _add(meta.get("seeds"))
+    config_blob = _parse_config_blob(summary_snapshot.get("config")) if summary_snapshot else {}
+    if config_blob:
+        _add(config_blob.get("seed"))
+        _add(config_blob.get("seeds"))
+    if summary_snapshot:
+        _add(summary_snapshot.get("seed"))
+        _add(summary_snapshot.get("seeds"))
+    if not seeds:
+        return "unknown"
+    return ", ".join(seeds)
+
+
+def _collect_model_badge(meta: Mapping[str, object], summary_snapshot: Mapping[str, str]) -> str:
+    candidates: list[str] = []
+
+    for key in ("model", "model_name", "llm", "llm_model"):
+        value = meta.get(key)
+        text = _normalise_text(value)
+        if text:
+            candidates.append(text)
+    real_meta = meta.get("real")
+    if isinstance(real_meta, Mapping):
+        text = _normalise_text(real_meta.get("model"))
+        if text:
+            candidates.append(text)
+    config_blob = _parse_config_blob(summary_snapshot.get("config")) if summary_snapshot else {}
+    if config_blob:
+        text = _normalise_text(config_blob.get("model"))
+        if text:
+            candidates.append(text)
+    model_from_rows = _normalise_text(summary_snapshot.get("model")) if summary_snapshot else ""
+    if model_from_rows:
+        candidates.append(model_from_rows)
+    choice = _first_nonempty(candidates)
+    return choice or "unknown"
+
+
+def _read_summary_snapshot(run_dir: Path) -> dict[str, str]:
+    csv_path = run_dir / "summary.csv"
+    if not csv_path.exists():
+        return {}
+    try:
+        with csv_path.open("r", encoding="utf-8", newline="") as handle:
+            reader = csv.DictReader(handle)
+            try:
+                first_row = next(reader)
+            except StopIteration:
+                return {}
+            return {key: value for key, value in first_row.items() if key}
+    except OSError:
+        return {}
+
+
+def _resolve_rows_path(run_dir: Path, report: Mapping[str, object]) -> tuple[Path | None, str]:
+    direct = run_dir / "rows.jsonl"
+    if direct.exists():
+        return direct, "rows.jsonl"
+    rows_paths = report.get("rows_paths") if isinstance(report, Mapping) else None
+    if isinstance(rows_paths, list):
+        for rel in rows_paths:
+            rel_text = _normalise_text(rel)
+            if not rel_text:
+                continue
+            candidate = run_dir / rel_text
+            if candidate.exists():
+                return candidate, rel_text
+    return None, "rows.jsonl"
+
+
+def _stringify_field(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (int, float, bool)):
+        return str(value)
+    try:
+        return json.dumps(value, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def _truncate_text(value: str, limit: int = 160) -> str:
+    if len(value) <= limit:
+        return value
+    if limit <= 1:
+        return "…"
+    return value[: limit - 1] + "…"
+
+
+def _format_success(value: object) -> str:
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    text = _normalise_text(value).lower()
+    if text in {"true", "1", "yes", "y"}:
+        return "yes"
+    if text in {"false", "0", "no", "n"}:
+        return "no"
+    return text or "–"
+
+
+def _extract_from_keys(payload: Mapping[str, object], keys: Iterable[str]) -> str:
+    for key in keys:
+        if key not in payload:
+            continue
+        text = _stringify_field(payload.get(key))
+        if text:
+            return text
+    return ""
+
+
+def _summarise_chart_rows(run_dir: Path) -> list[dict[str, object]]:
+    csv_path = run_dir / "summary.csv"
+    if not csv_path.exists():
+        return []
+    aggregates: dict[str, dict[str, object]] = {}
+    try:
+        with csv_path.open("r", encoding="utf-8", newline="") as handle:
+            reader = csv.DictReader(handle)
+            order_index = 0
+            for row in reader:
+                slice_id = _normalise_text(row.get("exp_id") or row.get("exp"))
+                if not slice_id:
+                    continue
+                bucket = aggregates.get(slice_id)
+                if bucket is None:
+                    bucket = {
+                        "id": slice_id,
+                        "trials": 0,
+                        "successes": 0.0,
+                        "asr_values": [],
+                        "order": order_index,
+                    }
+                    order_index += 1
+                    aggregates[slice_id] = bucket
+                trials_value = _parse_optional_int(row.get("trials")) or 0
+                successes_value = _parse_optional_int(row.get("successes"))
+                asr_value = _parse_optional_float(row.get("asr"))
+                bucket["trials"] = int(bucket["trials"]) + int(trials_value)
+                if asr_value is not None:
+                    bucket.setdefault("asr_values", []).append(float(asr_value))
+                if successes_value is None and asr_value is not None and trials_value:
+                    successes_value = int(round(float(asr_value) * float(trials_value)))
+                if successes_value is not None:
+                    bucket["successes"] = float(bucket.get("successes", 0.0)) + float(successes_value)
+    except OSError:
+        return []
+
+    results: list[dict[str, object]] = []
+    for bucket in aggregates.values():
+        trials_total = int(bucket.get("trials", 0))
+        successes_total = float(bucket.get("successes", 0.0))
+        asr_candidates = [value for value in bucket.get("asr_values", []) if isinstance(value, (int, float))]
+        if trials_total > 0:
+            asr = successes_total / float(trials_total)
+        elif asr_candidates:
+            asr = float(sum(asr_candidates)) / float(len(asr_candidates))
+        else:
+            asr = 0.0
+        asr = max(0.0, min(asr, 1.0))
+        results.append(
+            {
+                "id": bucket["id"],
+                "value": asr,
+                "trials": trials_total,
+                "successes": int(round(successes_total)),
+                "order": bucket.get("order", 0),
+            }
+        )
+
+    results.sort(key=lambda item: item.get("order", 0))
+    return results
+
+
+def _extract_slice_labels(
+    meta: Mapping[str, object],
+    report: Mapping[str, object],
+    run_dir: Path,
+    slice_ids: Iterable[str],
+) -> dict[str, str]:
+    targets = {sid for sid in slice_ids if sid}
+    if not targets:
+        return {}
+    labels: dict[str, str] = {}
+
+    def register(slice_id: object, description: object) -> None:
+        sid = _normalise_text(slice_id)
+        if not sid or sid not in targets:
+            return
+        if sid in labels:
+            return
+        desc = _normalise_text(description)
+        if not desc:
+            return
+        labels[sid] = desc
+
+    def register_collection(collection: object) -> None:
+        if isinstance(collection, Mapping):
+            for key, value in collection.items():
+                if isinstance(value, Mapping):
+                    candidate_id = value.get("id") or value.get("slice_id") or value.get("exp_id") or value.get("exp") or key
+                    candidate_desc = (
+                        value.get("description")
+                        or value.get("summary")
+                        or value.get("label")
+                        or value.get("title")
+                        or value.get("task")
+                    )
+                    metadata = value.get("metadata")
+                    if not candidate_desc and isinstance(metadata, Mapping):
+                        candidate_desc = metadata.get("description") or metadata.get("summary")
+                    register(candidate_id, candidate_desc)
+                else:
+                    register(key, value)
+        elif isinstance(collection, list):
+            for item in collection:
+                if isinstance(item, Mapping):
+                    candidate_id = (
+                        item.get("id")
+                        or item.get("slice_id")
+                        or item.get("exp_id")
+                        or item.get("exp")
+                        or item.get("name")
+                    )
+                    candidate_desc = (
+                        item.get("description")
+                        or item.get("summary")
+                        or item.get("label")
+                        or item.get("title")
+                        or item.get("task")
+                    )
+                    metadata = item.get("metadata")
+                    if not candidate_desc and isinstance(metadata, Mapping):
+                        candidate_desc = metadata.get("description") or metadata.get("summary")
+                    register(candidate_id, candidate_desc)
+                else:
+                    register(None, item)
+
+    for key in ("slices", "slice_summaries", "slice_summary", "threat_model_slices"):
+        register_collection(meta.get(key))
+    threat_model_meta = meta.get("threat_model")
+    if isinstance(threat_model_meta, Mapping):
+        register_collection(threat_model_meta.get("slices"))
+    threat_model_report = report.get("threat_model") if isinstance(report, Mapping) else None
+    if isinstance(threat_model_report, Mapping):
+        register_collection(threat_model_report.get("slices"))
+
+    rows_path, _ = _resolve_rows_path(run_dir, report)
+    if rows_path is not None:
+        try:
+            with rows_path.open("r", encoding="utf-8") as handle:
+                for index, line in enumerate(handle):
+                    if len(labels) >= len(targets):
+                        break
+                    if index > 2000:  # safeguard for extremely large files
+                        break
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        payload = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if not isinstance(payload, dict):
+                        continue
+                    event = _normalise_text(payload.get("event"))
+                    if event and event not in {"trial", "case", "row"}:
+                        continue
+                    sid = (
+                        payload.get("slice_id")
+                        or payload.get("exp_id")
+                        or payload.get("slice")
+                        or payload.get("exp")
+                    )
+                    desc = (
+                        payload.get("slice_description")
+                        or payload.get("description")
+                        or payload.get("task")
+                        or payload.get("input_case")
+                    )
+                    register(sid, desc)
+        except OSError:
+            pass
+
+    return labels
+
+
+def build_summary_chart(run_dir: Path, report: dict[str, object], meta: Mapping[str, object]) -> str:
+    chart_rows = _summarise_chart_rows(run_dir)
+    if not chart_rows:
+        return "<p><em>No summary data available for charting.</em></p>"
+    slice_ids = [row["id"] for row in chart_rows]
+    label_map = _extract_slice_labels(meta, report, run_dir, slice_ids)
+    bars: list[str] = []
+    for item in chart_rows:
+        slice_id = item["id"]
+        label_text = label_map.get(slice_id) or slice_id or "Slice"
+        safe_label = html.escape(label_text)
+        percent = max(0.0, min(float(item.get("value", 0.0)) * 100.0, 100.0))
+        height = percent
+        fill_classes = "chart-bar-fill"
+        if height <= 0.0:
+            fill_classes += " chart-bar-zero"
+        trials = int(item.get("trials", 0))
+        successes = int(item.get("successes", 0))
+        title = (
+            f"{slice_id}: {successes} success(es) / {trials} trial(s)"
+            if trials
+            else f"{slice_id}: {percent:.1f}% ASR"
+        )
+        bars.append(
+            "<div class='chart-bar' title='{title}'>"
+            "<div class='chart-bar-column'>"
+            "<div class='{fill_cls}' style='height: {height:.2f}%;'></div>"
+            "</div>"
+            "<div class='chart-bar-value'>{percent:.1f}%</div>"
+            "<div class='chart-bar-label'>{label}</div>"
+            "</div>".format(
+                title=html.escape(title),
+                fill_cls=fill_classes,
+                height=height,
+                percent=percent,
+                label=safe_label,
+            )
+        )
+
+    return "<div class='chart-card'><div class='chart-bars'>" + "".join(bars) + "</div></div>"
+
+
+def build_trial_table(run_dir: Path, report: dict[str, object]) -> str:
+    rows_path, rel_href = _resolve_rows_path(run_dir, report)
+    if rows_path is None:
+        return "<p><em>No rows.jsonl found for this run.</em></p>"
+    trial_rows: list[dict[str, str]] = []
+    more_available = False
+    try:
+        with rows_path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                if len(trial_rows) >= 50:
+                    more_available = True
+                    break
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    payload_raw = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(payload_raw, dict):
+                    continue
+                payload: Mapping[str, object] = payload_raw
+                event = _normalise_text(payload.get("event"))
+                if event in {"header", "summary"}:
+                    continue
+                trial_number = _normalise_text(payload.get("trial")) or str(len(trial_rows) + 1)
+                slice_id = _normalise_text(
+                    payload.get("slice_id")
+                    or payload.get("exp_id")
+                    or payload.get("slice")
+                    or payload.get("exp")
+                )
+                attack_id = _normalise_text(
+                    payload.get("attack_id")
+                    or payload.get("attack")
+                    or payload.get("attack_name")
+                    or payload.get("input_case")
+                )
+                input_text = _extract_from_keys(
+                    payload,
+                    (
+                        "input",
+                        "prompt",
+                        "user",
+                        "request",
+                        "attack_prompt",
+                        "messages",
+                        "conversation",
+                        "question",
+                    ),
+                )
+                output_text = _extract_from_keys(
+                    payload,
+                    (
+                        "output",
+                        "response",
+                        "model_output",
+                        "completion",
+                        "answer",
+                        "text",
+                        "content",
+                        "response_text",
+                    ),
+                )
+                success_value = _format_success(payload.get("success"))
+                trial_rows.append(
+                    {
+                        "trial": trial_number or "–",
+                        "slice_id": slice_id or "–",
+                        "attack_id": attack_id or "–",
+                        "input": input_text or "–",
+                        "output": output_text or "–",
+                        "success": success_value,
+                    }
+                )
+    except OSError:
+        return "<p><em>rows.jsonl could not be read.</em></p>"
+
+    if not trial_rows:
+        return "<p><em>No trial rows available to display.</em></p>"
+
+    header_cells = "".join(
+        f"<th>{label}</th>"
+        for label in ("trial", "slice_id", "attack_id", "input (truncated)", "output (truncated)", "success")
+    )
+    body_rows: list[str] = []
+    for row in trial_rows:
+        body_rows.append(
+            "<tr>"
+            + "".join(
+                f"<td>{html.escape(_truncate_text(row[key]))}</td>"
+                for key in ("trial", "slice_id", "attack_id", "input", "output", "success")
+            )
+            + "</tr>"
+        )
+
+    note_bits = [f"Showing first {len(trial_rows)} trial rows (max 50)."]
+    if more_available:
+        note_bits.append("Additional rows are available in rows.jsonl.")
+    note_html = f"<p class='trial-note'>{' '.join(html.escape(bit) for bit in note_bits)}</p>"
+    link_html = (
+        f"<p class='trial-link'><a href='{html.escape(rel_href)}'>See full rows.jsonl</a></p>"
+        if rel_href
+        else ""
+    )
+
+    table_html = (
+        "<table class='trial-table'><thead><tr>"
+        + header_cells
+        + "</tr></thead><tbody>"
+        + "".join(body_rows)
+        + "</tbody></table>"
+    )
+    return "<div class='trial-table-block'>" + note_html + table_html + link_html + "</div>"
 
 
 def build_table(headers: list[str], rows: Iterable[dict[str, str]]) -> str:
@@ -355,8 +871,8 @@ def build_overview(report: dict[str, object]) -> str:
     <div class='value'>{html.escape(cost_display)}</div>
   </div>
   <div class='overview-card'>
-    <div class='label'>Gates</div>
-    <div class='value'>pre: {html.escape(pre_text)} · post: {html.escape(post_text)}</div>
+    <div class='label'>Governance decisions</div>
+    <div class='value'>pre allow/warn/deny: {html.escape(pre_text)} · post allow/warn/deny: {html.escape(post_text)}</div>
     <div class='sub'>{html.escape(gate_subline)}</div>
   </div>
   <div class='overview-card'>
@@ -587,7 +1103,8 @@ def build_reason_table(report: dict[str, object]) -> str:
             + "</div>"
         )
 
-    return "<div class='reason-grid'>" + "".join(cards) + "</div>"
+    legend = "<p class='reason-legend'>pre = before calling model; post = after</p>"
+    return legend + "<div class='reason-grid'>" + "".join(cards) + "</div>"
 
 
 def build_data_links(run_dir: Path, report: dict[str, object]) -> str:
@@ -722,6 +1239,7 @@ def render_template(context: dict[str, str]) -> str:
       .missing{color:#9ca3af;}
       a{color:#2563eb;text-decoration:none;}
       a:hover{text-decoration:underline;}
+      $INLINE_CHART_CSS
     </style>
   </head>
   <body>
@@ -731,7 +1249,7 @@ def render_template(context: dict[str, str]) -> str:
     $QUICK_PANELS
     $DATA_LINKS
     $BANNERS
-    <h2>Top gate reasons</h2>
+    <h2>Why were decisions made?</h2>
     $TOP_REASONS
     <div class='overview-header'>
       <h2>Overview</h2>
@@ -741,10 +1259,12 @@ def render_template(context: dict[str, str]) -> str:
     $OVERVIEW
     <h2>Evaluator</h2>
     $EVALUATOR_PANEL
-    <h2>Summary chart</h2>
+    <h2>Attack result (ASR)</h2>
     $SUMMARY_CHART
     <h2>Summary table</h2>
     $SUMMARY_TABLE
+    <h2>Trial I/O</h2>
+    $TRIAL_TABLE
     <h2>Artifacts</h2>
     $ARTIFACT_LINKS
   </body>
@@ -760,19 +1280,19 @@ def write_report(run_dir: Path) -> None:
     table_html = build_table(headers, rows)
     meta = load_run_meta(run_dir)
     report = load_run_report(run_dir)
+    summary_snapshot = _read_summary_snapshot(run_dir)
 
     schema = html.escape(str(meta.get("summary_schema", ""))) if meta else ""
     results_schema = html.escape(str(meta.get("results_schema", ""))) if meta else ""
     run_id = html.escape(run_dir.name)
 
-    svg_rel = "summary.svg"
-    svg_tag = (
-        f"<object type='image/svg+xml' data='{svg_rel}' width='100%'></object>"
-        if (run_dir / svg_rel).exists()
-        else "<p><em>summary.svg not found</em></p>"
-    )
+    chart_html = build_summary_chart(run_dir, report, meta)
 
     meta_parts: list[str] = []
+    model_badge = _collect_model_badge(meta, summary_snapshot)
+    seed_badge = _collect_seed_badges(meta, summary_snapshot)
+    meta_parts.append(f"<div><strong>Model:</strong> {html.escape(model_badge)}</div>")
+    meta_parts.append(f"<div><strong>Seed:</strong> {html.escape(seed_badge)}</div>")
     if run_id:
         meta_parts.append(f"<div><strong>Run:</strong> {run_id}</div>")
     if schema:
@@ -797,10 +1317,12 @@ def write_report(run_dir: Path) -> None:
         "OVERVIEW_BADGE": build_overview_badge(report),
         "OVERVIEW": build_overview(report),
         "EVALUATOR_PANEL": build_evaluator_panel(report),
-        "SUMMARY_CHART": svg_tag,
+        "SUMMARY_CHART": chart_html,
         "SUMMARY_TABLE": table_html,
         "TOP_REASONS": build_reason_table(report),
         "ARTIFACT_LINKS": build_artifact_links(run_dir, report),
+        "TRIAL_TABLE": build_trial_table(run_dir, report),
+        "INLINE_CHART_CSS": _load_chart_css(),
     }
 
     html_doc = render_template(context)
