@@ -77,7 +77,7 @@ check-schema: venv
 
 run: install ## Run single experiment (EXP/SEED/TRIALS/MODE) into results/<RUN_DIR>
 	. .venv/bin/activate && python scripts/run_batch.py --exp $(EXP) --seeds "$(SEED)" --trials $(TRIALS) --mode $(MODE) --outdir "$(RUN_DIR)"
-	printf "%s\n" "$(RUN_ID)" > $(RUN_CURRENT)
+		printf "%s\n" "$(RUN_ID)" > $(RUN_CURRENT)
 
 .ONESHELL: xrun
 xrun:
@@ -88,11 +88,11 @@ xrun:
 	if [ -n "$(EXP_OVERRIDE)" ]; then CMD="$$CMD --exp $(EXP_OVERRIDE)"; fi; \
 	echo "xrun: $$CMD"; \
 	eval $$CMD; rc=$$?; if [ $$rc -ne 0 ]; then exit $$rc; fi; \
-	printf "%s\n" "$(RUN_ID)" > $(RUN_CURRENT)
+		printf "%s\n" "$(RUN_ID)" > $(RUN_CURRENT)
 
 sweep: install ## Multi-seed sweep (SEEDS) into results/<RUN_DIR>, then report
 	. .venv/bin/activate && python scripts/run_batch.py --exp $(EXP) --seeds "$(SEEDS)" --trials $(TRIALS) --mode $(MODE) --outdir "$(RUN_DIR)"
-	printf "%s\n" "$(RUN_ID)" > $(RUN_CURRENT)
+		printf "%s\n" "$(RUN_ID)" > $(RUN_CURRENT)
 	$(MAKE) report RUN_ID=$(RUN_ID)
 
 .PHONY: demo
@@ -131,13 +131,13 @@ xsweep: install ## Configurable sweep from CONFIG -> results/<RUN_DIR>
 	if [ -n "$(EXP_OVERRIDE)" ]; then CMD="$${CMD} --exp "$(EXP_OVERRIDE)""; fi; \
 	echo "xsweep: $$CMD"; \
 	eval $$CMD; rc=$$?; if [ $$rc -ne 0 ]; then exit $$rc; fi; \
-	printf "%s\n" "$(RUN_ID)" > $(RUN_CURRENT)
+		printf "%s\n" "$(RUN_ID)" > $(RUN_CURRENT)
 sweep3:
 	$(MAKE) sweep SEEDS="41,42,43" TRIALS=5 MODE=SHIM RUN_ID=$(RUN_ID)
 
 xsweep-all:
 	. .venv/bin/activate && $(PY) scripts/xsweep_all.py --glob "$(CONFIG_GLOB)" --seeds "$(SEEDS)" --trials $(TRIALS) --mode $(MODE) --outdir "$(RUN_DIR)"
-	printf "%s\n" "$(RUN_ID)" > $(RUN_CURRENT)
+		printf "%s\n" "$(RUN_ID)" > $(RUN_CURRENT)
 
 topn:
 	$(PY) scripts/update_readme_topn.py
@@ -161,6 +161,23 @@ plot: ## Plot results (safe wrapper creates placeholder SVG if empty)
 .PHONY: test-unit
 test-unit: install ## Run fast unit tests only
 	@$(PY) -m pytest -q tests/test_paths.py
+
+# --- E2E demo shortcuts ---
+RISK_TEXT ?= $(shell cat specs/demo_risks/secret_leak.md 2>/dev/null || echo "secret leak")
+RUN_GROQ ?= 1
+
+.PHONY: demo-spec
+demo-spec: ## Generate specs/threat_model.yaml from natural-language risk text
+	@python scripts/nl_to_spec.py "$(RISK_TEXT)"
+
+.PHONY: demo-groq
+demo-groq: ## NL risk -> spec -> translate -> run -> aggregate -> open (Groq; tiny budget)
+	$(MAKE) demo-spec
+# translate -> cases.jsonl (existing translator target/command)
+	python tools/translate.py --spec specs/threat_model.yaml --out results/$$RUN_ID/cases.jsonl || true
+# end-to-end (defaults to dry-run unless DRY_RUN=0)
+	$(MAKE) mvp
+	$(MAKE) open-report
 
 .PHONY: test
 test: install ## Run all Python tests
