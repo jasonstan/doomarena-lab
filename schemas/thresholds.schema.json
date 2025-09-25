@@ -37,6 +37,24 @@
       "minimum": 0,
       "description": "Maximum number of post-call denies allowed"
     },
+    "pass_rate_callable": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "warn_below": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Warn if callable pass-rate drops below this threshold"
+        },
+        "fail_below": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Fail if callable pass-rate drops below this threshold"
+        }
+      }
+    },
     "policy": {
       "type": "string",
       "enum": [

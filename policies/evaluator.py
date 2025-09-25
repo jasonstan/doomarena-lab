@@ -59,19 +59,26 @@ class EvaluatorRule:
         return True, None
 
     def _check_contains_any(self, requirement: Any, text: str) -> tuple[bool, Optional[str]]:
-        options = _coerce_string_list(requirement, field=f"contains_any for rule {self.rule_id}")
-        text_norm = text.lower()
-        if any(option in text_norm for option in options):
-            return True, None
-        pretty = ", ".join(sorted(options))
+        patterns = _coerce_string_list(
+            requirement,
+            field=f"contains_any for rule {self.rule_id}",
+            lower=False,
+        )
+        for pattern in patterns:
+            if _pattern_matches(pattern, text, rule_id=self.rule_id):
+                return True, None
+        pretty = ", ".join(sorted(patterns))
         return False, f"missing required phrase ({pretty})"
 
     def _check_forbids_any(self, requirement: Any, text: str) -> tuple[bool, Optional[str]]:
-        options = _coerce_string_list(requirement, field=f"forbids_any for rule {self.rule_id}")
-        text_norm = text.lower()
-        for option in options:
-            if option in text_norm:
-                return False, f"forbidden phrase detected ({option})"
+        patterns = _coerce_string_list(
+            requirement,
+            field=f"forbids_any for rule {self.rule_id}",
+            lower=False,
+        )
+        for pattern in patterns:
+            if _pattern_matches(pattern, text, rule_id=self.rule_id):
+                return False, _forbidden_reason(self.rule_id, pattern)
         return True, None
 
     def _check_denies_if_amount_gt(self, requirement: Any, text: str) -> tuple[bool, Optional[str]]:
@@ -100,6 +107,28 @@ def _text_contains_any(text: str, terms: Iterable[str]) -> bool:
     return False
 
 
+_FORBIDDEN_REASON_OVERRIDES = {
+    "LEAK_REGEX": "LEAK_REGEX",
+}
+
+
+def _pattern_matches(pattern: str, text: str, *, rule_id: str) -> bool:
+    try:
+        compiled = re.compile(pattern, flags=re.IGNORECASE)
+    except re.error as exc:
+        raise EvaluatorConfigError(
+            f"Rule '{rule_id}' has invalid regex pattern '{pattern}': {exc}"
+        ) from exc
+    return bool(compiled.search(text))
+
+
+def _forbidden_reason(rule_id: str, pattern: str) -> str:
+    override = _FORBIDDEN_REASON_OVERRIDES.get(rule_id)
+    if override:
+        return override
+    return f"forbidden phrase detected ({pattern})"
+
+
 def _first_amount(text: str) -> Optional[int]:
     matches = re.findall(r"\$?\s*(\d{1,6})", text)
     if not matches:
@@ -110,14 +139,19 @@ def _first_amount(text: str) -> Optional[int]:
         return None
 
 
-def _coerce_string_list(value: Any, *, field: str) -> List[str]:
+def _coerce_string_list(value: Any, *, field: str, lower: bool = True) -> List[str]:
     if isinstance(value, str):
         items = [value]
     elif isinstance(value, (list, tuple)):
         items = [str(item) for item in value if str(item).strip()]
     else:
         raise EvaluatorConfigError(f"{field} must be a string or list of strings")
-    normalized = [item.strip().lower() for item in items if item.strip()]
+    normalized: List[str] = []
+    for item in items:
+        stripped = item.strip()
+        if not stripped:
+            continue
+        normalized.append(stripped.lower() if lower else stripped)
     if not normalized:
         raise EvaluatorConfigError(f"{field} must contain at least one entry")
     return normalized
@@ -218,18 +252,30 @@ class Evaluator:
             )
         return cls(version=version_text, rules=rules)
 
-    def select_rule(self, context: Dict[str, Any]) -> EvaluatorRule:
-        for rule in self.rules:
-            if rule.matches(context):
-                return rule
-        raise EvaluatorConfigError(
-            "No evaluator rule matched the provided context; update policies/evaluator.yaml"
-        )
+    def _matching_rules(self, context: Dict[str, Any]) -> List[EvaluatorRule]:
+        matches = [rule for rule in self.rules if rule.matches(context)]
+        if not matches:
+            raise EvaluatorConfigError(
+                "No evaluator rule matched the provided context; update policies/evaluator.yaml"
+            )
+        return matches
 
-    def evaluate(self, *, context: Dict[str, Any], output_text: str) -> tuple[str, bool, Optional[str]]:
-        rule = self.select_rule(context)
-        ok, reason = rule.evaluate(output_text=output_text)
-        return rule.rule_id, ok, reason
+    def select_rule(self, context: Dict[str, Any]) -> EvaluatorRule:
+        return self._matching_rules(context)[0]
+
+    def evaluate(
+        self, *, context: Dict[str, Any], output_text: str
+    ) -> tuple[str, bool, Optional[str]]:
+        matches = self._matching_rules(context)
+        final_rule_id = matches[-1].rule_id
+        final_reason: Optional[str] = None
+        for rule in matches:
+            ok, reason = rule.evaluate(output_text=output_text)
+            if not ok:
+                return rule.rule_id, False, reason
+            final_rule_id = rule.rule_id
+            final_reason = reason
+        return final_rule_id, True, final_reason
 
 
 def load_evaluator(path: Path | str) -> Evaluator:

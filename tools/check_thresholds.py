@@ -33,6 +33,12 @@ class Metrics:
 
 
 @dataclass
+class PassRateThreshold:
+    warn_below: Optional[float] = None
+    fail_below: Optional[float] = None
+
+
+@dataclass
 class ThresholdConfig:
     min_total_trials: Optional[int] = None
     min_callable_trials: Optional[int] = None
@@ -41,6 +47,7 @@ class ThresholdConfig:
     policy: str = "warn"
     notes: str = ""
     version: int = 1
+    pass_rate_callable: Optional[PassRateThreshold] = None
 
 
 @dataclass
@@ -121,6 +128,27 @@ def load_thresholds(path: Path) -> Optional[ThresholdConfig]:
         raise ValueError("min_pass_rate must be between 0 and 1")
     max_post_deny = _as_int(data.get("max_post_deny"))
 
+    pass_rate_callable = None
+    raw_pass_rate_callable = data.get("pass_rate_callable")
+    if raw_pass_rate_callable is not None:
+        if not isinstance(raw_pass_rate_callable, dict):
+            raise ValueError("pass_rate_callable must be a mapping")
+        warn_below = _as_float(raw_pass_rate_callable.get("warn_below"))
+        fail_below = _as_float(raw_pass_rate_callable.get("fail_below"))
+        for name, value in (("warn_below", warn_below), ("fail_below", fail_below)):
+            if value is not None and not (0.0 <= value <= 1.0):
+                raise ValueError(f"{name} must be between 0 and 1")
+        if (
+            warn_below is not None
+            and fail_below is not None
+            and warn_below < fail_below
+        ):
+            raise ValueError("warn_below must be >= fail_below when both are provided")
+        pass_rate_callable = PassRateThreshold(
+            warn_below=warn_below,
+            fail_below=fail_below,
+        )
+
     policy_raw = str(data.get("policy", "warn") or "warn").strip().lower()
     if policy_raw not in {"allow", "warn", "strict"}:
         raise ValueError(f"Invalid policy value: {policy_raw}")
@@ -132,6 +160,7 @@ def load_thresholds(path: Path) -> Optional[ThresholdConfig]:
         min_callable_trials=min_callable_trials,
         min_pass_rate=min_pass_rate,
         max_post_deny=max_post_deny,
+        pass_rate_callable=pass_rate_callable,
         policy=policy_raw,
         notes=notes,
         version=version,
@@ -243,6 +272,7 @@ def evaluate_thresholds(
     reasons: list[str] = []
     detail_lines: list[str] = []
 
+    fail_detected = False
     checks_met: list[bool] = []
 
     def add_detail(line: str) -> None:
@@ -318,15 +348,56 @@ def evaluate_thresholds(
     else:
         ratio_suffix = f" ({metrics.passed_trials}/0)"
 
-    check_min(
-        "pass_rate",
-        metrics.pass_rate,
-        thresholds.min_pass_rate if thresholds else None,
-        lambda value, threshold: f"pass_rate={value:.2f} < min={threshold:.2f}",
-        lambda value: f"{value:.2f}",
-        lambda value: f"{value:.2f}",
-        suffix=ratio_suffix,
-    )
+    if thresholds and thresholds.pass_rate_callable:
+        warn_threshold = thresholds.pass_rate_callable.warn_below
+        fail_threshold = thresholds.pass_rate_callable.fail_below
+        baseline = thresholds.min_pass_rate if thresholds else None
+        if warn_threshold is None:
+            warn_threshold = baseline
+        if fail_threshold is None:
+            fail_threshold = baseline
+
+        pass_rate_value = metrics.pass_rate
+        status_tag = "OK"
+        reason_text: Optional[str] = None
+
+        if fail_threshold is not None and pass_rate_value < fail_threshold:
+            status_tag = "FAIL"
+            reason_text = (
+                f"pass_rate={pass_rate_value:.2f} < fail_below={fail_threshold:.2f}"
+            )
+            fail_detected = True
+        elif warn_threshold is not None and pass_rate_value < warn_threshold:
+            status_tag = "WARN"
+            reason_text = (
+                f"pass_rate={pass_rate_value:.2f} < warn_below={warn_threshold:.2f}"
+            )
+
+        thresholds_parts: list[str] = []
+        thresholds_parts.append(
+            warn_threshold is not None and f"warn {warn_threshold:.2f}" or "warn n/a"
+        )
+        thresholds_parts.append(
+            fail_threshold is not None and f"fail {fail_threshold:.2f}" or "fail n/a"
+        )
+        thresholds_text = "; ".join(thresholds_parts)
+
+        add_detail(
+            f"- pass_rate: {pass_rate_value:.2f}{ratio_suffix} ({thresholds_text}) [{status_tag}]"
+        )
+        if reason_text:
+            reasons.append(reason_text)
+        checks_met.append(status_tag == "OK")
+    else:
+        check_min(
+            "pass_rate",
+            metrics.pass_rate,
+            thresholds.min_pass_rate if thresholds else None,
+            lambda value, threshold: f"pass_rate={value:.2f} < min={threshold:.2f}",
+            lambda value: f"{value:.2f}",
+            lambda value: f"{value:.2f}",
+            suffix=ratio_suffix,
+        )
 
     # post deny counts
     check_max(
@@ -340,7 +411,10 @@ def evaluate_thresholds(
 
     all_met = all(checks_met) if checks_met else True
 
-    if all_met or not reasons:
+    if fail_detected:
+        status = "FAIL"
+        exit_code = 1
+    elif all_met or not reasons:
         status = "OK"
         exit_code = 0
     else:
