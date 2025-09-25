@@ -51,7 +51,7 @@ jobs:
       - name: Run MVP (translate → run → aggregate)
         run: |
           echo "DRY_RUN=${DRY_RUN} STREAM=${STREAM}"
-          make mvp
+          make mvp MVP_TRANSLATE_CMD='python tools/translate.py --spec specs/threat_model.yaml --out results/$${RUN_ID}/cases.jsonl'
 
       - name: Locate latest run dir
         id: findrun
