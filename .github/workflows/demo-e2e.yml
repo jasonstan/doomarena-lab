@@ -56,7 +56,16 @@ jobs:
       - name: Locate latest run dir
         id: findrun
         run: |
-          RUN_DIR=$(ls -1d results/*Z | tail -1)
+          set -euo pipefail
+          python tools/latest_run.py
+          if [ -L results/LATEST ]; then
+            RUN_DIR=$(readlink -f results/LATEST)
+          elif [ -f results/LATEST.path ]; then
+            RUN_DIR=$(cat results/LATEST.path)
+          else
+            echo "Could not determine latest run directory" >&2
+            exit 1
+          fi
           echo "RUN_DIR=$RUN_DIR"
           echo "RUN_DIR=$RUN_DIR" >> "$GITHUB_ENV"
 
