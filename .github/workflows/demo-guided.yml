@@ -88,8 +88,36 @@ jobs:
       - name: Locate latest run dir
         id: findrun
         run: |
-          RUN_DIR=$(ls -1d results/*Z | tail -1)
-          echo "RUN_DIR=$RUN_DIR" | tee -a "$GITHUB_ENV"
+          set -euo pipefail
+          RUN_ID="${RUN_ID:-}"
+          if [ -z "$RUN_ID" ] && [ -f results/.run_id ]; then
+            RUN_ID=$(tr -d '\n\r\t ' < results/.run_id)
+          fi
+          if [ -z "$RUN_ID" ]; then
+            RUN_ID=$(python - <<'PY'
+import os
+from pathlib import Path
+
+root = Path("results")
+run_dirs = [p for p in root.iterdir() if p.is_dir() and p.name != "LATEST"] if root.exists() else []
+run_dirs.sort(key=lambda p: p.stat().st_mtime)
+print(run_dirs[-1].name if run_dirs else "")
+PY
+            )
+          fi
+          if [ -z "$RUN_ID" ]; then
+            echo "Unable to determine RUN_ID." >&2
+            exit 1
+          fi
+          RUN_DIR="results/$RUN_ID"
+          if [ ! -d "$RUN_DIR" ]; then
+            echo "Run directory $RUN_DIR does not exist." >&2
+            exit 1
+          fi
+          {
+            echo "RUN_ID=$RUN_ID"
+            echo "RUN_DIR=$RUN_DIR"
+          } | tee -a "$GITHUB_ENV"
 
       - name: Verify artifacts
         run: |
