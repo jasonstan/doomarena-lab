@@ -2,14 +2,20 @@
 
 # --- summary-index helpers (stable schema) ---
 from __future__ import annotations
-import json, os
+
+import json
+import os
 from typing import Dict, List, Tuple
 
 
 def build_summary_index_payload(
-    totals:int, callable_cnt:int, pass_cnt:int, fail_cnt:int,
-    top_pre:List[Tuple[str,int]], top_post:List[Tuple[str,int]],
-    malformed_cnt:int = 0
+    totals: int,
+    callable_cnt: int,
+    pass_cnt: int,
+    fail_cnt: int,
+    top_pre: List[Tuple[str, int]],
+    top_post: List[Tuple[str, int]],
+    malformed_cnt: int = 0,
 ) -> Dict:
     return {
         "totals": {"rows": totals, "callable": callable_cnt, "passes": pass_cnt, "fails": fail_cnt},
@@ -17,9 +23,7 @@ def build_summary_index_payload(
         "top_reasons": {"pre": top_pre, "post": top_post},
         "malformed": malformed_cnt,
     }
-
-
-def write_summary_index(run_dir:str, payload:Dict) -> str:
+def write_summary_index(run_dir: str, payload: Dict) -> str:
     p = os.path.join(run_dir, "summary_index.json")
     with open(p, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, separators=(",", ":"))
