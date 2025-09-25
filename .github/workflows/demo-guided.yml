@@ -89,35 +89,23 @@ jobs:
         id: findrun
         run: |
           set -euo pipefail
-          RUN_ID="${RUN_ID:-}"
-          if [ -z "$RUN_ID" ] && [ -f results/.run_id ]; then
-            RUN_ID=$(tr -d '\n\r\t ' < results/.run_id)
+          # Prefer explicit RUN_ID if present or written by prior steps
+          if [ -z "${RUN_ID:-}" ] && [ -f results/.run_id ]; then
+            RUN_ID="$(tr -d '\n\r\t ' < results/.run_id)"
           fi
-          if [ -z "$RUN_ID" ]; then
-            RUN_ID=$(python - <<'PY'
-import os
-from pathlib import Path
-
-root = Path("results")
-run_dirs = [p for p in root.iterdir() if p.is_dir() and p.name != "LATEST"] if root.exists() else []
-run_dirs.sort(key=lambda p: p.stat().st_mtime)
-print(run_dirs[-1].name if run_dirs else "")
-PY
-            )
+          if [ -n "${RUN_ID:-}" ]; then
+            RUN_DIR="results/${RUN_ID}"
+          else
+            # Fallback: newest results/*Z directory (exclude LATEST)
+            RUN_DIR="$(ls -1dt results/*Z 2>/dev/null | head -1 || true)"
           fi
-          if [ -z "$RUN_ID" ]; then
-            echo "Unable to determine RUN_ID." >&2
+          if [ -z "${RUN_DIR:-}" ] || [ ! -d "$RUN_DIR" ]; then
+            echo "ERROR: Unable to determine RUN_DIR" >&2
+            ls -la results || true
             exit 1
           fi
-          RUN_DIR="results/$RUN_ID"
-          if [ ! -d "$RUN_DIR" ]; then
-            echo "Run directory $RUN_DIR does not exist." >&2
-            exit 1
-          fi
-          {
-            echo "RUN_ID=$RUN_ID"
-            echo "RUN_DIR=$RUN_DIR"
-          } | tee -a "$GITHUB_ENV"
+          echo "Resolved RUN_DIR=$RUN_DIR"
+          echo "RUN_DIR=$RUN_DIR" | tee -a "$GITHUB_ENV"
 
       - name: Verify artifacts
         run: |
