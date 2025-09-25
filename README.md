@@ -246,3 +246,12 @@ PRs welcome. Keep demos fast and artifacts reproducible. Aim for small, reviewab
    - Optionally edit the **risk_text** to generate a different tiny demo spec.
 3) Open the run → **Artifacts** → download `demo-run-…`. Inside you’ll find `index.html`, `summary.csv`, `summary.svg`, `rows.jsonl`, `run.json`.
 4) Open `index.html` locally to review/record the report (status banner, pass-rate over callable, top reasons).
+
+### Run the guided demo (UI only)
+1) Add a repo secret **GROQ_API_KEY** (Settings → Secrets and variables → Actions).
+2) Create environment **demo-approval** and (optionally) require your approval to proceed.
+3) Actions → **Guided Demo (proposal → approval → run)** → **Run workflow**.
+   - Paste your natural-language risk.
+   - First job posts a **Proposal** summary and uploads `proposal.md`.
+   - Click **Review deployments → Approve** to run the experiment.
+4) When the second job finishes, download the **demo-run-…** artifact and open `index.html`.
