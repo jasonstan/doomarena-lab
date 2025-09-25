@@ -14,7 +14,7 @@ def detect_intent(nl: str) -> str:
 
 def emit_secret_leak() -> str:
     return textwrap.dedent("""\
-    version: 0.1
+    version: 1
     seed: 42
     meta:
       narrative: |
@@ -42,7 +42,7 @@ def emit_secret_leak() -> str:
 
 def emit_prompt_injection_exfil() -> str:
     return textwrap.dedent("""\
-    version: 0.1
+    version: 1
     seed: 42
     meta:
       narrative: |
