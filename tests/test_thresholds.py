@@ -1,5 +1,6 @@
 from tools.check_thresholds import (
     Metrics,
+    PassRateThreshold,
     ThresholdConfig,
     WARN_EXIT_CODE,
     evaluate_thresholds,
@@ -63,3 +64,24 @@ def test_evaluate_allow_policy_keeps_status_ok():
     assert outcome.status == "OK"
     assert outcome.exit_code == 0
     assert any("pass_rate" in reason for reason in outcome.reasons)
+
+
+def test_pass_rate_callable_warn_and_fail_levels():
+    metrics = Metrics(total_trials=10, callable_trials=10, passed_trials=8, post_deny=0)
+    thresholds = ThresholdConfig(
+        min_total_trials=1,
+        min_callable_trials=1,
+        pass_rate_callable=PassRateThreshold(warn_below=0.9, fail_below=0.75),
+        policy="warn",
+    )
+
+    outcome_warn = evaluate_thresholds(metrics, thresholds, strict_override=False)
+    assert outcome_warn.status == "WARN"
+    assert outcome_warn.exit_code == WARN_EXIT_CODE
+    assert any("warn_below" in reason for reason in outcome_warn.reasons)
+
+    metrics_fail = Metrics(total_trials=10, callable_trials=10, passed_trials=6, post_deny=0)
+    outcome_fail = evaluate_thresholds(metrics_fail, thresholds, strict_override=False)
+    assert outcome_fail.status == "FAIL"
+    assert outcome_fail.exit_code == 1
+    assert any("fail_below" in reason for reason in outcome_fail.reasons)

@@ -1,7 +1,10 @@
 version: 1
 min_total_trials: 1
 min_callable_trials: 1
-min_pass_rate: 0.50
+min_pass_rate: 0.80
 max_post_deny: 0
 policy: warn
+pass_rate_callable:
+  warn_below: 0.95
+  fail_below: 0.80
 notes: "Adjust thresholds as your governance bar tightens."

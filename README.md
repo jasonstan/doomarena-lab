@@ -158,6 +158,24 @@ Run `make check-thresholds` locally (`STRICT=1 make check-thresholds` to fail). 
 - `make help` — list common targets & docs.
 - `make mvp` — end-to-end translator → REAL slice → aggregate (dry-run by default).
 - `make demo` — tiny sweep (defaults to SHIM) producing `results/<RUN_ID>/`.
+
+## Founder demo (10 min)
+1) Put `GROQ_API_KEY` in `.env` (see `.env.example`).
+2) Generate spec from NL risk:
+   ```bash
+   python scripts/nl_to_spec.py
+   ```
+3) Dry-run end-to-end:
+   ```bash
+   make mvp
+   make open-report
+   ```
+4) Real run on Groq (budgeted by low case count):
+   ```bash
+   DRY_RUN=0 make mvp
+   make open-report
+   ```
+   Artifacts: `results/<RUN_ID>/index.html`, `summary.csv`, `summary.svg`, `summary_index.json` (also mirrored to `results/LATEST/`).
 - `make xsweep CONFIG=...` — run a configurable sweep.
 - `make report` — asserts `summary.csv`/`summary.svg`; updates `results/LATEST`.
 - `make open-report` — open or print `results/LATEST/index.html`.
