@@ -255,3 +255,6 @@ PRs welcome. Keep demos fast and artifacts reproducible. Aim for small, reviewab
    - First job posts a **Proposal** summary and uploads `proposal.md`.
    - Click **Review deployments → Approve** to run the experiment.
 4) When the second job finishes, download the **demo-run-…** artifact and open `index.html`.
+
+### To require the approval pause
+Create environment **demo-approval** (Settings → Environments) and add yourself as a required reviewer. The guided demo will pause after “Proposal” until you click **Review deployments → Approve**.
