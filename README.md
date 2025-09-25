@@ -239,3 +239,10 @@ PRs welcome. Keep demos fast and artifacts reproducible. Aim for small, reviewab
 |1|airline_escalating_v1:99|0.000|SHIM|2|99|UNKNOWN|2025-09-24T18:50:39Z|
 |2|airline_escalating_v1:99|0.000|SHIM|2|99|UNKNOWN|2025-09-24T18:50:35Z|
 <!-- TOPN:END -->
+## Run the E2E demo from GitHub Actions (no CLI)
+1) In this repo, go to **Settings → Secrets and variables → Actions → New repository secret** and add `GROQ_API_KEY`.
+2) Go to **Actions → Demo E2E (manual)** → **Run workflow**.
+   - Choose **dry_run: true** to validate the pipeline quickly, then run again with **dry_run: false** for a real Groq call.
+   - Optionally edit the **risk_text** to generate a different tiny demo spec.
+3) Open the run → **Artifacts** → download `demo-run-…`. Inside you’ll find `index.html`, `summary.csv`, `summary.svg`, `rows.jsonl`, `run.json`.
+4) Open `index.html` locally to review/record the report (status banner, pass-rate over callable, top reasons).
