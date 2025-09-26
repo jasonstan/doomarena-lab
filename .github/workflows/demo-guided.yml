@@ -192,7 +192,6 @@ jobs:
 
       - name: Append mini-report to summary
         env:
-          RD: ${{ env.RUN_DIR }}
           SUM: ${{ github.step_summary }}
           GROQ_MODEL: ${{ env.GROQ_MODEL }}
           TRIALS: ${{ env.TRIALS }}
@@ -200,7 +199,10 @@ jobs:
         run: |
           python - <<'PY'
           import csv, os, pathlib
-          rd = pathlib.Path(os.environ["RD"])
+          try:
+              rd = pathlib.Path(os.environ["RUN_DIR"])
+          except KeyError as exc:
+              raise SystemExit("RUN_DIR is not defined in the environment") from exc
           sum_md = pathlib.Path(os.environ["SUM"])
           model = os.environ.get("GROQ_MODEL","")
           trials = os.environ.get("TRIALS","")
