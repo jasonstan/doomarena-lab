@@ -178,41 +178,45 @@ jobs:
       - name: Append mini-report to summary
         run: |
           set -euo pipefail
-          python - "$RUN_DIR" <<'PY' >>"$GITHUB_STEP_SUMMARY"
-          import csv, json, sys, pathlib
-          run_dir = pathlib.Path(sys.argv[1])
-          def find(pattern):
+          py() {
+            python - "$@" <<'PY'
+            import csv, json, sys, pathlib
+            run_dir = pathlib.Path(sys.argv[1])
+            # Model/seed from run.json (top-level or nested)
+            def find(pattern):
               for p in run_dir.glob(pattern):
-                  if p.is_file():
-                      return p
-          # model/seed
-          run_json = (run_dir / "run.json") if (run_dir / "run.json").is_file() else find("**/run.json")
-          model = seed = "unknown"
-          if run_json:
+                if p.is_file():
+                  return p
+            run_json = (run_dir / "run.json") if (run_dir / "run.json").is_file() else find("**/run.json")
+            model = seed = "unknown"
+            if run_json:
               try:
-                  meta = json.loads(run_json.read_text(encoding="utf-8"))
-                  model = meta.get("model", meta.get("config", {}).get("model", "unknown"))
-                  seed = meta.get("seed", meta.get("config", {}).get("seed", "unknown"))
+                meta = json.loads(run_json.read_text(encoding="utf-8"))
+                model = meta.get("model", meta.get("config", {}).get("model", "unknown"))
+                seed = meta.get("seed", meta.get("config", {}).get("seed", "unknown"))
               except Exception:
-                  pass
-          # summary stats
-          succ = trials = asr = "n/a"
-          scsv = run_dir / "summary.csv"
-          if scsv.is_file():
+                pass
+            # ASR from summary.csv
+            asr = "n/a"
+            succ = trials = "0"
+            scsv = run_dir / "summary.csv"
+            if scsv.is_file():
               try:
-                  with scsv.open() as f:
-                      rows = list(csv.DictReader(f))
-                  if rows:
-                      succ = rows[0].get("successes") or rows[0].get("success", "0")
-                      trials = rows[0].get("trials", "0")
-                      asr = rows[0].get("asr", "0")
+                with scsv.open() as f:
+                  r = list(csv.DictReader(f))
+                if r:
+                  succ = r[0].get("successes") or r[0].get("success", "0")
+                  trials = r[0].get("trials", "0")
+                  asr = r[0].get("asr", "0")
               except Exception:
-                  pass
-          print("### Mini report")
-          print(f"- **Model**: `{model}`  ·  **Seed**: `{seed}`")
-          print(f"- **Pass-rate**: `{succ}/{trials}`  (ASR = `{asr}`)")
-          print(f"- **Artifacts**: `{run_dir}/index.html`, `{run_dir}/summary.csv`, `{run_dir}/summary.svg`")
-          PY
+                pass
+            print(f"### Mini report")
+            print(f"- **Model**: `{model}`  ·  **Seed**: `{seed}`")
+            print(f"- **Pass-rate**: `{succ}/{trials}`  (ASR = `{asr}`)")
+            print(f"- **Artifacts**: `{run_dir}/index.html`, `{run_dir}/summary.csv`, `{run_dir}/summary.svg`")
+            PY
+          }
+          py "$RUN_DIR" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Verify artifacts
         run: |
