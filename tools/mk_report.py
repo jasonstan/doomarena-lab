@@ -1,173 +1,294 @@
 #!/usr/bin/env python3
+"""
+Richer, layout-agnostic HTML report writer.
+Works with either:
+  • legacy: results/<RUN_ID>/{summary_index.json, <exp>/rows.jsonl}
+  • current: results/<RUN_ID>/{summary.csv, summary.svg, run.json[, rows.jsonl]}
+Also tolerates rows.jsonl living under a child directory (e.g., <exp>/rows.jsonl).
+"""
 from __future__ import annotations
-import json, csv, html, sys
+
+import csv
+import json
+import sys
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Optional, Dict, Any, List, Tuple
 
-# Usage: python tools/mk_report.py RESULTS_DIR
-# Writes: <RESULTS_DIR>/index.html (always)
+RunDir = Path
 
+# -------------- helpers --------------
+def find_first(base: Path, names: Iterable[str]) -> Optional[Path]:
+    for n in names:
+        p = base / n
+        if p.exists():
+            return p
+    return None
 
-def resolve_run_dir(requested: Path) -> Path:
-    """Return the directory to operate on for a requested results path.
+def find_glob_first(base: Path, patterns: Iterable[str]) -> Optional[Path]:
+    for pat in patterns:
+        for p in base.rglob(pat):
+            if p.is_file():
+                return p
+    return None
 
-    The results tooling maintains a `LATEST` symlink (or a pointer file
-    `LATEST.path` when symlinks are unavailable). When callers pass
-    `results/LATEST` we should follow those indirections so that helpers like
-    `open_artifacts.py` keep working regardless of the platform setup.
-    """
-
-    requested = Path(requested)
-
+def read_json(path: Optional[Path]) -> Optional[Dict[str, Any]]:
+    if not path or not path.exists():
+        return None
     try:
-        resolved = requested.resolve(strict=False)
-    except Exception:
-        resolved = requested
-
-    if resolved.exists():
-        return resolved
-
-    pointer = requested.parent / f"{requested.name}.path"
-    if pointer.exists():
-        try:
-            target_text = pointer.read_text(encoding="utf-8").strip()
-        except Exception:
-            target_text = ""
-        if target_text:
-            target = Path(target_text)
-            if not target.is_absolute():
-                target = (pointer.parent / target).resolve()
-            return target
-
-    return resolved
-
-def _read_json(p: Path):
-    try:
-        return json.loads(p.read_text(encoding="utf-8"))
+        return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return None
 
-def _read_rows_jsonl(p: Path, limit: int = 25):
-    rows = []
+def read_jsonl(path: Optional[Path], limit: int | None = None) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    if not path or not path.exists():
+        return rows
     try:
-        with p.open("r", encoding="utf-8") as fh:
-            for i, line in enumerate(fh):
-                if not line.strip():
+        with path.open("r", encoding="utf-8") as f:
+            for i, line in enumerate(f):
+                if limit is not None and i >= limit:
+                    break
+                line = line.strip()
+                if not line:
                     continue
                 try:
                     rows.append(json.loads(line))
                 except Exception:
-                    pass
-                if i + 1 >= limit:
-                    break
+                    # tolerate malformed lines
+                    continue
     except Exception:
         pass
     return rows
 
-def _read_summary_csv(p: Path):
+def read_summary_csv(path: Optional[Path]) -> Optional[Dict[str, Any]]:
+    if not path or not path.exists():
+        return None
     try:
-        with p.open("r", encoding="utf-8") as fh:
-            return list(csv.DictReader(fh))
+        with path.open("r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            first = next(reader, None)
+            return first
     except Exception:
-        return []
+        return None
 
-def _h(s: str) -> str:
-    return html.escape(s, quote=True)
+def coerce_float(x: Any) -> Optional[float]:
+    try:
+        return float(x)
+    except Exception:
+        return None
 
-def _mk_trial_table(rows: Iterable[dict]) -> str:
-    if not rows:
-        return "<p><em>No per-trial rows available.</em></p>"
-    # Try common keys; fall back to first two stringy fields
-    cols = ["attack_id", "attack_prompt", "input", "output", "judge", "pass"]
-    present = [c for c in cols if any(c in r for r in rows)]
-    if not present:
-        # choose up to 4 columns that look stringy
-        first = rows[0]
-        present = [k for k, v in first.items() if isinstance(v, (str, int, float))][:4]
-    thead = "".join(f"<th>{_h(c)}</th>" for c in present)
-    trs = []
-    for r in rows:
-        tds = "".join(f"<td>{_h(str(r.get(c, '')))}</td>" for c in present)
-        trs.append(f"<tr>{tds}</tr>")
-    return f"""
-<table border="1" cellspacing="0" cellpadding="6">
-  <thead><tr>{thead}</tr></thead>
-  <tbody>
-    {''.join(trs)}
-  </tbody>
-</table>
+def coerce_int(x: Any) -> Optional[int]:
+    try:
+        return int(x)
+    except Exception:
+        return None
+
+# -------------- data extraction --------------
+@dataclass
+class Meta:
+    model: Optional[str] = None
+    seed: Optional[int] = None
+    trials: Optional[int] = None
+    started_at: Optional[str] = None
+
+def extract_meta(run_dir: RunDir) -> Meta:
+    # Prefer top-level run.json; fallback to any nested run.json
+    run_json = find_first(run_dir, ["run.json"]) or find_glob_first(run_dir, ["*/run.json"])
+    meta = Meta()
+    data = read_json(run_json) or {}
+    # Common places
+    meta.model = data.get("model") or data.get("config", {}).get("model")
+    meta.seed = data.get("seed") or data.get("config", {}).get("seed")
+    meta.trials = data.get("trials") or data.get("config", {}).get("trials")
+    meta.started_at = data.get("started_at") or data.get("ts") or data.get("time")
+    # Fallback: from summary.csv
+    if meta.trials is None:
+        row = read_summary_csv(run_dir / "summary.csv")
+        if row:
+            meta.trials = coerce_int(row.get("trials") or row.get("n") or row.get("count"))
+    return meta
+
+def compute_asr(run_dir: RunDir, summary_row: Optional[Dict[str, Any]]) -> Optional[float]:
+    # 1) CSV explicitly carries asr
+    if summary_row:
+        for key in ("asr", "ASR", "pass_rate", "success_rate"):
+            if key in summary_row and summary_row[key] not in (None, ""):
+                v = coerce_float(summary_row[key])
+                if v is not None:
+                    return v
+        # or successes / trials
+        succ = coerce_int(summary_row.get("successes") or summary_row.get("success"))
+        trials = coerce_int(summary_row.get("trials") or summary_row.get("count"))
+        if succ is not None and trials:
+            return succ / max(trials, 1)
+    # 2) derive from rows.jsonl
+    rows = load_rows_anywhere(run_dir, limit=None)  # full read to compute
+    if rows:
+        ok = 0
+        total = 0
+        for r in rows:
+            val = r.get("success")
+            if isinstance(val, bool):
+                ok += 1 if val else 0
+                total += 1
+            elif val in ("PASS", "SUCCESS", "OK", "True", "true", 1):
+                ok += 1
+                total += 1
+            elif val in ("FAIL", "False", "false", 0):
+                total += 1
+        if total:
+            return ok / total
+    return None
+
+def load_rows_anywhere(run_dir: RunDir, limit: Optional[int] = 25) -> List[Dict[str, Any]]:
+    # Prefer top-level rows.jsonl/rows.json; else any nested *rows.jsonl
+    cand = (
+        find_first(run_dir, ["rows.jsonl", "rows.json"])
+        or find_glob_first(run_dir, ["*/rows.jsonl", "*/*/rows.jsonl", "*/rows.json", "*/*/rows.json"])
+    )
+    if cand and cand.suffix == ".json":
+        try:
+            data = read_json(cand)
+            if isinstance(data, list):
+                return data[: limit or len(data)]
+            return []
+        except Exception:
+            return []
+    return read_jsonl(cand, limit=limit)
+
+# -------------- HTML --------------
+CSS = """
+  body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Helvetica,Arial,sans-serif;line-height:1.45;margin:24px;}
+  h1{margin:0 0 8px 0}
+  .badges{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 16px}
+  .badge{background:#f2f4f7;border:1px solid #e4e7ec;border-radius:999px;padding:4px 10px;font-size:12px}
+  .kv{display:grid;grid-template-columns:120px 1fr;gap:6px;align-items:start;margin:8px 0 16px}
+  .section{margin:24px 0}
+  .muted{color:#667085}
+  table{border-collapse:collapse;width:100%;margin-top:8px}
+  th,td{border:1px solid #e4e7ec;padding:6px 8px;font-size:13px;vertical-align:top}
+  th{background:#f8fafc;text-align:left}
+  code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace}
+  .io{max-height:8.5em;overflow:auto;white-space:pre-wrap}
+  img.summary{max-width:520px;width:100%;height:auto;border:1px solid #e4e7ec;border-radius:8px;background:#fff}
 """
 
-def main():
-    if len(sys.argv) != 2:
-        print("usage: mk_report.py RESULTS_DIR", file=sys.stderr)
-        sys.exit(2)
+def render_html(run_dir: RunDir) -> str:
+    row_csv = read_summary_csv(run_dir / "summary.csv")
+    meta = extract_meta(run_dir)
+    asr = compute_asr(run_dir, row_csv)
 
-    run_dir = resolve_run_dir(Path(sys.argv[1]))
-    run_dir.mkdir(parents=True, exist_ok=True)
-    out = run_dir / "index.html"
+    # Trial rows (first N)
+    trials = load_rows_anywhere(run_dir, limit=25)
 
-    # Inputs we try to use if present
-    run_json = _read_json(run_dir / "run.json")
-    rows = _read_rows_jsonl(run_dir / "rows.jsonl", limit=25)
-    summary_rows = _read_summary_csv(run_dir / "summary.csv")
+    # Pull candidate I/O fields
+    def pick(d: Dict[str, Any], keys: Tuple[str, ...]) -> Optional[str]:
+        for k in keys:
+            if k in d and d[k] not in (None, ""):
+                v = d[k]
+                return v if isinstance(v, str) else json.dumps(v, ensure_ascii=False)
+        return None
 
-    # Pull friendly metadata if available
-    model = (run_json or {}).get("model") or (run_json or {}).get("config", {}).get("model") or ""
-    seed = (run_json or {}).get("seed")
-    trials = (run_json or {}).get("trials")
-    asr = ""
-    if summary_rows:
-        # look for common columns
-        r0 = summary_rows[0]
-        asr = r0.get("asr") or r0.get("pass_rate") or ""
+    # Build table rows
+    table_rows: List[str] = []
+    for i, r in enumerate(trials):
+        trial_id = r.get("trial_id") or r.get("idx") or i
+        prompt = pick(r, ("input", "prompt", "attack_prompt", "user", "message"))
+        output = pick(r, ("output", "response", "model", "assistant"))
+        success = r.get("success")
+        reason = r.get("reason") or r.get("judge_reason") or r.get("why")
+        table_rows.append(
+            "<tr>"
+            f"<td>{trial_id}</td>"
+            f"<td class='io'><pre>{html_escape(prompt or '')}</pre></td>"
+            f"<td class='io'><pre>{html_escape(output or '')}</pre></td>"
+            f"<td>{html_escape(str(success))}</td>"
+            f"<td class='io'><pre>{html_escape(str(reason or ''))}</pre></td>"
+            "</tr>"
+        )
 
-    # Build the page
+    # Summary SVG (if present)
+    svg_tag = ""
+    if (run_dir / "summary.svg").exists():
+        svg_tag = "<img class='summary' src='summary.svg' alt='Summary chart'/>"
+
+    # Badges
     badges = []
-    if model: badges.append(f"<span>model: <code>{_h(model)}</code></span>")
-    if seed is not None: badges.append(f"<span>seed: <code>{_h(str(seed))}</code></span>")
-    if trials is not None: badges.append(f"<span>trials: <code>{_h(str(trials))}</code></span>")
-    if asr: badges.append(f"<span>ASR: <code>{_h(str(asr))}</code></span>")
-    badges_html = " · ".join(badges) if badges else "<em>No run metadata found.</em>"
+    if asr is not None:
+        badges.append(f"<span class='badge'>ASR: {asr:.6g}</span>")
+    if meta.model:
+        badges.append(f"<span class='badge'>model: {html_escape(meta.model)}</span>")
+    if meta.seed is not None:
+        badges.append(f"<span class='badge'>seed: {meta.seed}</span>")
+    if meta.trials is not None:
+        badges.append(f"<span class='badge'>trials: {meta.trials}</span>")
+    if meta.started_at:
+        badges.append(f"<span class='badge'>started: {html_escape(str(meta.started_at))}</span>")
+    badges_html = f"<div class='badges'>{''.join(badges)}</div>" if badges else ""
 
-    trial_table = _mk_trial_table(rows)
+    # Trial table HTML
+    table_html = (
+        "<p class='muted'>No per-trial rows available.</p>"
+        if not table_rows
+        else (
+            "<table><thead><tr>"
+            "<th>#</th><th>Prompt</th><th>Model output</th><th>Success</th><th>Reason</th>"
+            "</tr></thead><tbody>"
+            + "".join(table_rows)
+            + "</tbody></table>"
+        )
+    )
 
-    # Link out to artifacts if present
-    links = []
+    # Artifact links (always)
+    artifacts = []
     for name in ("summary.csv", "summary.svg", "run.json", "rows.jsonl"):
         p = run_dir / name
         if p.exists():
-            links.append(f'<li><a href="{_h(name)}">{_h(name)}</a></li>')
-    links_html = "<ul>" + "".join(links) + "</ul>" if links else "<p><em>No artifacts found.</em></p>"
+            artifacts.append(f"<li><a href='{name}'>{name}</a></li>")
+    artifacts_html = "<ul>" + "".join(artifacts) + "</ul>" if artifacts else "<p class='muted'>None</p>"
 
-    html_doc = f"""<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>DoomArena-Lab Report — { _h(run_dir.name) }</title>
-  <style>
-    body {{ font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; line-height: 1.4; padding: 24px; }}
-    h1 {{ margin: 0 0 8px; }}
-    .badges span {{ background: #f3f4f6; border-radius: 6px; padding: 4px 8px; margin-right: 6px; display: inline-block; }}
-    table {{ width: 100%; border-collapse: collapse; margin-top: 8px; }}
-    th, td {{ text-align: left; vertical-align: top; }}
-    code {{ background: #f8fafc; padding: 0 4px; border-radius: 4px; }}
-  </style>
-</head>
-<body>
-  <h1>DoomArena-Lab Report</h1>
-  <p>Run: <code>{_h(run_dir.name)}</code></p>
-  <p class="badges">{badges_html}</p>
+    return f"""<!doctype html>
+<meta charset="utf-8"/>
+<title>DoomArena-Lab Report — {run_dir.name}</title>
+<style>{CSS}</style>
+<h1>DoomArena-Lab Report</h1>
+<div class="muted">Run: {run_dir.name}</div>
+{badges_html}
 
-  <h2>Trial I/O (first {len(rows)} rows)</h2>
-  {trial_table}
+<div class="section">
+  {svg_tag}
+</div>
 
+<div class="section">
+  <h2>Trial I/O (first {len(table_rows)} rows)</h2>
+  {table_html}
+</div>
+
+<div class="section">
   <h2>Artifacts</h2>
-  {links_html}
-</body>
-</html>
+  {artifacts_html}
+</div>
 """
-    out.write_text(html_doc, encoding="utf-8")
+
+def html_escape(s: str) -> str:
+    return (
+        s.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+        .replace("'", "&#39;")
+    )
+
+def main(argv: List[str]) -> int:
+    if len(argv) != 2:
+        print("usage: mk_report.py <RUN_DIR>", file=sys.stderr)
+        return 2
+    run_dir = Path(argv[1]).resolve()
+    run_dir.mkdir(parents=True, exist_ok=True)
+    html = render_html(run_dir)
+    (run_dir / "index.html").write_text(html, encoding="utf-8")
+    return 0
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main(sys.argv))
