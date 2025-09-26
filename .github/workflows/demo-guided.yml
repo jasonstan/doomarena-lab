@@ -164,9 +164,10 @@ jobs:
           python tools/mk_report.py "$RUN_DIR" || true
           # If somehow still missing/empty, try once more (degraded)
           if [ ! -s "$RUN_DIR/index.html" ]; then
-            python - <<'PY'
+            python - "$RUN_DIR" <<'PY'
             from pathlib import Path
-            rd = Path("${RUN_DIR}")
+            import sys
+            rd = Path(sys.argv[1])
             html = rd / "index.html"
             data = f"<h1>Report (degraded)</h1><p>Artifacts are in {rd.name}.</p>"
             html.write_text(data, encoding="utf-8")
