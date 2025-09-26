@@ -1,92 +1,119 @@
-"""HTML report wrapper that prefers ``summary_index.json`` with a CSV fallback."""
-
 from __future__ import annotations
-
-import argparse
-import csv, json, os
-import sys
+import html, json
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Dict, List, Tuple
 
-from tools import mk_report
+def _esc(s: Any) -> str:
+    return html.escape("" if s is None else str(s))
 
+def _label_for_slice(row: Dict[str, Any]) -> str:
+    return row.get("description") or row.get("exp_id") or row.get("id") or row.get("mode") or "slice"
 
-def load_summary_index(run_dir: str):
-    p = os.path.join(run_dir, "summary_index.json")
-    try:
-        with open(p, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        # Fallback from summary.csv (best-effort, no new deps)
-        csv_path = os.path.join(run_dir, "summary.csv")
-        totals = callable_cnt = pass_cnt = fail_cnt = 0
-        pre_counts, post_counts = {}, {}
+def _series_from_json(data: Dict[str, Any]) -> List[Tuple[str, float]]:
+    series = []
+    slices = data.get("slices") or data.get("experiments") or []
+    for s in slices:
+        lbl = _label_for_slice(s)
+        asr = float(s.get("asr") or s.get("callable_pass_rate") or 0.0)
+        series.append((lbl, asr))
+    if not series:
+        series.append(("Results", float(data.get("callable_pass_rate") or 0.0)))
+    return series
 
-        def _as_int(value: Any) -> int:
-            if value is None:
-                return 0
-            if isinstance(value, (int, float)):
-                return int(value)
-            text = str(value).strip()
-            if not text:
-                return 0
+def _series_from_csv(rows: List[Dict[str, Any]]) -> List[Tuple[str, float]]:
+    series = []
+    for r in rows:
+        lbl = r.get("description") or r.get("exp_id") or r.get("id") or "exp"
+        asr = float(r.get("asr") or r.get("pass_rate") or r.get("success_rate") or 0.0)
+        series.append((lbl, asr))
+    if not series:
+        series.append(("Results", 0.0))
+    return series
+
+def _read_rows_jsonl(run_dir: Path, limit: int = 50) -> List[Dict[str, Any]]:
+    p = run_dir / "rows.jsonl"
+    out: List[Dict[str, Any]] = []
+    if not p.exists():
+        return out
+    with p.open(encoding="utf-8") as f:
+        for i, line in enumerate(f):
+            if i >= limit: break
             try:
-                return int(text)
-            except ValueError:
-                try:
-                    return int(float(text))
-                except ValueError:
-                    return 0
+                obj = json.loads(line)
+            except Exception:
+                continue
+            out.append(obj)
+    return out
 
-        if os.path.isfile(csv_path):
-            with open(csv_path, newline="", encoding="utf-8") as f:
-                r = csv.DictReader(f)
-                for row in r:
-                    totals += 1
-                    callable_trials = _as_int(row.get("callable"))
-                    successful_trials = _as_int(row.get("success"))
-                    if callable_trials:
-                        callable_cnt += callable_trials
-                        pass_cnt += successful_trials
-                        fail_cnt += max(callable_trials - successful_trials, 0)
-                    pre = row.get("pre_reason_code") or ""
-                    post = row.get("post_reason_code") or ""
-                    if pre: pre_counts[pre] = pre_counts.get(pre, 0) + 1
-                    if post: post_counts[post] = post_counts.get(post, 0) + 1
-        top_pre = sorted(pre_counts.items(), key=lambda x: (-x[1], x[0]))[:10]
-        top_post = sorted(post_counts.items(), key=lambda x: (-x[1], x[0]))[:10]
-        return {
-            "totals": {"rows": totals, "callable": callable_cnt, "passes": pass_cnt, "fails": fail_cnt},
-            "callable_pass_rate": (pass_cnt / callable_cnt) if callable_cnt else 0.0,
-            "top_reasons": {"pre": top_pre, "post": top_post},
-            "malformed": 0,
-        }
+def render_html(run_dir: Path, data: Dict[str, Any], mode: str = "json") -> str:
+    # Header data (guarded)
+    model = (data.get("model") or data.get("config", {}).get("model") or "unknown") if mode=="json" else (
+            (data.get("csv_rows", [{}])[0].get("model") if data.get("csv_rows") else "unknown")
+    )
+    seed = str((data.get("seed") or data.get("meta", {}).get("seed") or "unknown") if mode=="json" else (
+            (data.get("csv_rows", [{}])[0].get("seed") if data.get("csv_rows") else "unknown")
+    ))
 
-
-def write_html_report(
-    run_dir: Path, *, summary_index: Mapping[str, Any] | None = None
-) -> Path:
-    resolved_dir = mk_report.resolve_run_dir(run_dir)
-    run_dir_path = Path(os.fspath(resolved_dir))
-    if summary_index is None:
-        summary_index = load_summary_index(os.fspath(run_dir_path))
+    # Series
+    if mode == "json":
+        series = _series_from_json(data)
+    elif mode == "csv":
+        series = _series_from_csv(data.get("csv_rows", []))
     else:
-        summary_index = dict(summary_index)
-    mk_report.write_report(run_dir_path)
-    return run_dir_path / "index.html"
+        series = [("No data", 0.0)]
 
+    bars = "".join(
+        f'<div style="display:flex;align-items:center;margin:6px 0;">'
+        f'<div style="width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{_esc(lbl)}</div>'
+        f'<div style="background:#e8ecf3;width:360px;height:16px;margin:0 8px 0 8px;">'
+        f'<div style="background:#5b8def;height:16px;width:{min(max(val,0.0),1.0)*360:.0f}px"></div></div>'
+        f'<div style="width:60px;text-align:right">{val:.0%}</div></div>'
+        for lbl, val in series
+    )
 
-def _parse_args(argv: list[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Generate DoomArena HTML report")
-    parser.add_argument("run_dir", help="Run directory to render")
-    return parser.parse_args(argv)
+    # Trial I/O table (truncate for readability)
+    trials = _read_rows_jsonl(run_dir, limit=50)
+    if trials:
+        trs = []
+        for i, t in enumerate(trials, 1):
+            inn = _esc(t.get("input", ""))[:160] + ("…" if len(_esc(t.get("input",""))) > 160 else "")
+            out = _esc(t.get("output", ""))[:160] + ("…" if len(_esc(t.get("output",""))) > 160 else "")
+            trs.append(f"<tr><td>{i}</td><td>{_esc(t.get('exp_id') or t.get('slice_id') or '—')}</td>"
+                       f"<td>{_esc(t.get('attack_id') or '—')}</td><td><code>{inn}</code></td>"
+                       f"<td><code>{out}</code></td><td>{'✔' if t.get('success') else '✖'}</td></tr>")
+        io_table = (
+            "<table><thead><tr><th>#</th><th>slice</th><th>attack</th><th>input</th><th>output</th><th>ok</th></tr></thead>"
+            f"<tbody>{''.join(trs)}</tbody></table>"
+            "<p>See full details in <code>rows.jsonl</code>.</p>"
+        )
+    else:
+        io_table = "<p>No trial rows found.</p>"
 
+    # HTML
+    head = f"""<!doctype html><meta charset="utf-8">
+<title>DoomArena-Lab Report — {_esc(run_dir.name)}</title>
+<style>
+  body {{ font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 24px; }}
+  .badges span {{ display:inline-block; margin-right:10px; padding:4px 8px; border-radius:12px; background:#f0f0f0; }}
+  h1 {{ margin-bottom: 8px; }}
+  section {{ margin: 18px 0; }}
+  table {{ border-collapse: collapse; width: 100%; }}
+  th, td {{ border: 1px solid #ddd; padding: 6px 8px; vertical-align: top; }}
+  th {{ background: #fafafa; text-align: left; }}
+</style>
+<h1>DoomArena-Lab Run Report</h1>
+<div class="badges">
+  <span>Run: {_esc(run_dir.name)}</span>
+  <span>Model: {_esc(model)}</span>
+  <span>Seed: {_esc(seed)}</span>
+</div>
+"""
+    chart = f"<section><h2>Attack results (ASR)</h2>{bars}</section>"
+    gates = (
+        "<section><h2>Governance decisions</h2>"
+        "<p><em>pre</em> = before calling the model; <em>post</em> = after seeing model output.</p>"
+        "</section>"
+    )
+    io = f"<section><h2>Trial I/O (first 50)</h2>{io_table}</section>"
 
-def main(argv: list[str]) -> int:
-    args = _parse_args(argv)
-    write_html_report(Path(args.run_dir))
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main(sys.argv[1:]))
+    return head + chart + gates + io
