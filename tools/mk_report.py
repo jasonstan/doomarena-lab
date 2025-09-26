@@ -7,6 +7,40 @@ from typing import Iterable
 # Usage: python tools/mk_report.py RESULTS_DIR
 # Writes: <RESULTS_DIR>/index.html (always)
 
+
+def resolve_run_dir(requested: Path) -> Path:
+    """Return the directory to operate on for a requested results path.
+
+    The results tooling maintains a `LATEST` symlink (or a pointer file
+    `LATEST.path` when symlinks are unavailable). When callers pass
+    `results/LATEST` we should follow those indirections so that helpers like
+    `open_artifacts.py` keep working regardless of the platform setup.
+    """
+
+    requested = Path(requested)
+
+    try:
+        resolved = requested.resolve(strict=False)
+    except Exception:
+        resolved = requested
+
+    if resolved.exists():
+        return resolved
+
+    pointer = requested.parent / f"{requested.name}.path"
+    if pointer.exists():
+        try:
+            target_text = pointer.read_text(encoding="utf-8").strip()
+        except Exception:
+            target_text = ""
+        if target_text:
+            target = Path(target_text)
+            if not target.is_absolute():
+                target = (pointer.parent / target).resolve()
+            return target
+
+    return resolved
+
 def _read_json(p: Path):
     try:
         return json.loads(p.read_text(encoding="utf-8"))
@@ -69,7 +103,7 @@ def main():
         print("usage: mk_report.py RESULTS_DIR", file=sys.stderr)
         sys.exit(2)
 
-    run_dir = Path(sys.argv[1])
+    run_dir = resolve_run_dir(Path(sys.argv[1]))
     run_dir.mkdir(parents=True, exist_ok=True)
     out = run_dir / "index.html"
 
