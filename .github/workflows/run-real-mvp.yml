@@ -192,9 +192,6 @@ jobs:
           make latest
 
       - name: Ensure index.html exists (fallback render)
-        env:
-          RUN_ID: ${{ env.RUN_ID }}
-        shell: bash
         run: |
           set -euxo pipefail
           RUN_DIR="results/${RUN_ID}"
