@@ -154,18 +154,65 @@ jobs:
           [ -n "${RUN_DIR:-}" ] && [ -d "$RUN_DIR" ] || { echo "ERROR: Unable to determine RUN_DIR"; ls -la results || true; exit 1; }
           echo "RUN_DIR=$RUN_DIR" | tee -a "$GITHUB_ENV"
 
-      - name: Ensure report exists (fallback render)
+      - name: Generate full report
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           set -euxo pipefail
           [ -d "$RUN_DIR" ] || (echo "Run dir not found: $RUN_DIR" >&2; exit 1)
-          # If index.html is missing or empty, (re)build it from available summary files.
+          python tools/mk_report.py "$RUN_DIR" || true
+          # Degraded backup if something weird happens
           if [ ! -s "$RUN_DIR/index.html" ]; then
-            python tools/mk_report.py "$RUN_DIR" || true
+            python - "$RUN_DIR" <<'PY'
+            from pathlib import Path
+            import sys
+
+            rd = Path(sys.argv[1])
+            (rd / "index.html").write_text(
+              f"<h1>Report (degraded)</h1><p>Artifacts are in {rd.name}.</p>",
+              encoding="utf-8",
+            )
+            PY
           fi
-          # Show what we have for quick debugging
-          ls -la "$RUN_DIR" | sed 's/^/RUN_DIR: /'
+
+      - name: Append mini-report to summary
+        run: |
+          set -euo pipefail
+          python - <<'PY' "${RUN_DIR}"
+          import csv, json, sys, pathlib
+          run_dir = pathlib.Path(sys.argv[1])
+          def find(pattern):
+              for p in run_dir.glob(pattern):
+                  if p.is_file():
+                      return p
+          # model/seed
+          run_json = (run_dir / "run.json") if (run_dir / "run.json").is_file() else find("**/run.json")
+          model = seed = "unknown"
+          if run_json:
+              try:
+                  meta = json.loads(run_json.read_text(encoding="utf-8"))
+                  model = meta.get("model", meta.get("config", {}).get("model", "unknown"))
+                  seed = meta.get("seed", meta.get("config", {}).get("seed", "unknown"))
+              except Exception:
+                  pass
+          # summary stats
+          succ = trials = asr = "n/a"
+          scsv = run_dir / "summary.csv"
+          if scsv.is_file():
+              try:
+                  with scsv.open() as f:
+                      rows = list(csv.DictReader(f))
+                  if rows:
+                      succ = rows[0].get("successes") or rows[0].get("success", "0")
+                      trials = rows[0].get("trials", "0")
+                      asr = rows[0].get("asr", "0")
+              except Exception:
+                  pass
+          print("### Mini report")
+          print(f"- **Model**: `{model}`  ·  **Seed**: `{seed}`")
+          print(f"- **Pass-rate**: `{succ}/{trials}`  (ASR = `{asr}`)")
+          print(f"- **Artifacts**: `{run_dir}/index.html`, `{run_dir}/summary.csv`, `{run_dir}/summary.svg`")
+          PY >> "$GITHUB_STEP_SUMMARY"
 
       - name: Verify artifacts
         run: |
