@@ -17,6 +17,34 @@ from typing import Iterable, Optional, Dict, Any, List, Tuple
 
 RunDir = Path
 
+
+def resolve_run_dir(requested: Path) -> Path:
+    """Resolve the run directory, following LATEST.path pointers when needed."""
+
+    requested = Path(requested)
+
+    try:
+        resolved = requested.resolve(strict=False)
+    except Exception:
+        resolved = requested
+
+    if resolved.exists():
+        return resolved
+
+    pointer = requested.parent / f"{requested.name}.path"
+    if pointer.exists():
+        try:
+            target_text = pointer.read_text(encoding="utf-8").strip()
+        except Exception:
+            target_text = ""
+        if target_text:
+            target = Path(target_text)
+            if not target.is_absolute():
+                target = (pointer.parent / target).resolve()
+            return target
+
+    return resolved
+
 # -------------- helpers --------------
 def find_first(base: Path, names: Iterable[str]) -> Optional[Path]:
     for n in names:
@@ -284,7 +312,7 @@ def main(argv: List[str]) -> int:
     if len(argv) != 2:
         print("usage: mk_report.py <RUN_DIR>", file=sys.stderr)
         return 2
-    run_dir = Path(argv[1]).resolve()
+    run_dir = resolve_run_dir(Path(argv[1]))
     run_dir.mkdir(parents=True, exist_ok=True)
     html = render_html(run_dir)
     (run_dir / "index.html").write_text(html, encoding="utf-8")
