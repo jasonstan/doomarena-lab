@@ -36,6 +36,7 @@ permissions:
 env:
   GROQ_MODEL: ${{ inputs.model }}
   TRIALS: ${{ inputs.trials }}
+  # Choice inputs surface as strings; normalize to 1/0 for shell scripts.
   DRY_RUN: ${{ inputs.dry_run == 'true' && '1' || '0' }}
   RISK_TEXT: ${{ inputs.risk_text }}
 
@@ -138,6 +139,7 @@ jobs:
     env:
       PYTHONUTF8: "1"
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      # Reuse the workflow-scoped flag so shell scripts see consistent 1/0 values.
       DRY_RUN: ${{ env.DRY_RUN }}
       STREAM: '0'
       GROQ_MODEL: ${{ inputs.model }}
