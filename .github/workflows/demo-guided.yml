@@ -191,21 +191,54 @@ jobs:
           ls -la "$RUN_DIR" | sed 's/^/RUN_DIR: /'
 
       - name: Append mini-report to summary
-        shell: bash
+        env:
+          RD: ${{ env.RUN_DIR }}
+          SUM: ${{ github.step_summary }}
+          GROQ_MODEL: ${{ env.GROQ_MODEL }}
+          TRIALS: ${{ env.TRIALS }}
+          DRY_RUN: ${{ env.DRY_RUN }}
         run: |
-          set -euo pipefail
-          : "${GROQ_MODEL:?}"; : "${TRIALS:?}"; : "${DRY_RUN:?}"; : "${RUN_DIR:?}"
-          {
-            echo "### Report"
-            echo
-            echo "- model: \`${GROQ_MODEL}\`"
-            echo "- trials: \`${TRIALS}\`"
-            echo "- dry_run: \`${DRY_RUN}\`"
-            echo
-            echo "- ${RUN_DIR}/index.html"
-            echo "- ${RUN_DIR}/summary.csv"
-            echo "- ${RUN_DIR}/summary.svg"
-          } >> "$GITHUB_STEP_SUMMARY"
+          python - <<'PY'
+          import csv, os, pathlib
+          rd = pathlib.Path(os.environ["RD"])
+          sum_md = pathlib.Path(os.environ["SUM"])
+          model = os.environ.get("GROQ_MODEL","")
+          trials = os.environ.get("TRIALS","")
+          dry = os.environ.get("DRY_RUN","")
+          asr = ""
+          scsv = rd / "summary.csv"
+          if scsv.exists():
+              try:
+                  with scsv.open(newline="", encoding="utf-8") as f:
+                      row = next(csv.DictReader(f), None)
+                  if row:
+                      asr = row.get("asr") or row.get("ASR") or ""
+                      if not asr:
+                          succ = row.get("successes") or row.get("success")
+                          tot  = row.get("trials") or row.get("count")
+                          if succ and tot:
+                              try:
+                                  asr = str(float(succ)/max(float(tot),1.0))
+                              except Exception:
+                                  pass
+              except Exception:
+                  pass
+          lines = ["### Execute summary",""]
+          facts = []
+          if model: facts.append(f"model=`{model}`")
+          if trials: facts.append(f"trials=`{trials}`")
+          if dry: facts.append(f"dry=`{dry}`")
+          if asr: facts.append(f"asr=`{asr}`")
+          if facts:
+              lines.append("- " + " · ".join(facts))
+          for name in ("index.html","summary.csv","summary.svg","run.json","rows.jsonl"):
+              p = rd / name
+              if p.exists():
+                  lines.append(f"- {rd}/{name}")
+          text = "\n".join(lines) + "\n"
+          prev = sum_md.read_text(encoding="utf-8") if sum_md.exists() else ""
+          sum_md.write_text((prev + ("\n" if prev and not prev.endswith("\n") else "") + text), encoding="utf-8")
+          PY
 
       - name: Verify artifacts
         run: |
