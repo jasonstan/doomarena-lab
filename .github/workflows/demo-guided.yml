@@ -160,19 +160,24 @@ jobs:
         run: |
           set -euxo pipefail
           [ -d "$RUN_DIR" ] || (echo "Run dir not found: $RUN_DIR" >&2; exit 1)
-          # Generate full HTML; if it fails, fall back to minimal rendering, but keep going
+
+          # Try to render the full HTML report (non-fatal)
           python tools/mk_report.py "$RUN_DIR" || true
-          # If somehow still missing/empty, try once more (degraded)
+
+          # If still missing, write a minimal degraded page via a safe, aligned heredoc
           if [ ! -s "$RUN_DIR/index.html" ]; then
             python - "$RUN_DIR" <<'PY'
-            from pathlib import Path
-            import sys
-            rd = Path(sys.argv[1])
-            html = rd / "index.html"
-            data = f"<h1>Report (degraded)</h1><p>Artifacts are in {rd.name}.</p>"
-            html.write_text(data, encoding="utf-8")
-            PY
+from pathlib import Path
+import sys
+rd = Path(sys.argv[1])
+html = rd / "index.html"
+html.write_text(
+    f"<h1>Report (degraded)</h1><p>Artifacts are in {rd.name}.</p>",
+    encoding="utf-8",
+)
+PY
           fi
+
           ls -la "$RUN_DIR" | sed 's/^/RUN_DIR: /'
 
       - name: Append mini-report to summary
