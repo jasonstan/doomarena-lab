@@ -171,7 +171,13 @@ jobs:
           test -s "$RUN_DIR/index.html"
           test -s "$RUN_DIR/summary.csv"
           test -s "$RUN_DIR/summary.svg"
-          python -c "import os, pathlib; run_dir = pathlib.Path(os.environ['RUN_DIR']); summary = pathlib.Path(os.environ['GITHUB_STEP_SUMMARY']); lines = ['### Artifacts', *[f'- {run_dir / name}' for name in ('index.html', 'summary.csv', 'summary.svg')]]; text = '\n'.join(lines) + '\n'; summary.parent.mkdir(parents=True, exist_ok=True); summary.touch(exist_ok=True); data = summary.read_text(encoding='utf-8') if summary.stat().st_size else ''; prefix = '\n' if data and not data.endswith('\n') else ''; summary.write_text(f"{data}{prefix}{text}", encoding='utf-8')"
+
+          {
+            echo "### Artifacts"
+            echo "- $RUN_DIR/index.html"
+            echo "- $RUN_DIR/summary.csv"
+            echo "- $RUN_DIR/summary.svg"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload per-run artifacts
         uses: actions/upload-artifact@v4
