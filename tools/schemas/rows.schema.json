@@ -1,0 +1,51 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "DoomArena rows.jsonl row",
+  "type": "object",
+  "description": "Schema fragment describing the per-call records emitted in rows.jsonl.",
+  "properties": {
+    "trial_id": {
+      "type": ["string", "integer", "null"],
+      "description": "Identifier for the logical trial or case that this call belongs to."
+    },
+    "trial_index": {
+      "type": ["integer", "null"],
+      "description": "Zero-based index of the trial iteration within the run."
+    },
+    "callable": {
+      "type": ["boolean", "null"],
+      "description": "True when the underlying model call executed. False or null indicates the attack was blocked before invocation."
+    },
+    "success": {
+      "type": ["boolean", "null"],
+      "description": "True when the call satisfied the evaluator's success criteria."
+    },
+    "pre_gate": {
+      "type": ["object", "string", "null"],
+      "description": "Reason metadata returned by the pre-call safety gate. Objects commonly include decision, reason_code, and rule_id."
+    },
+    "post_gate": {
+      "type": ["object", "string", "null"],
+      "description": "Reason metadata returned by the post-call safety gate. Objects commonly include decision, reason_code, and rule_id."
+    },
+    "input_case": {
+      "type": ["object", "null"],
+      "description": "Input case metadata describing the attack prompt and contextual identifiers.",
+      "properties": {
+        "prompt": {
+          "type": ["string", "null"],
+          "description": "Literal prompt string sent to the callable target."
+        },
+        "attack_prompt": {
+          "type": ["string", "null"],
+          "description": "Alias for prompt used in earlier pipeline versions."
+        }
+      }
+    },
+    "model_response": {
+      "type": ["string", "null"],
+      "description": "Literal text returned from the model or callable after execution."
+    }
+  },
+  "additionalProperties": true
+}
