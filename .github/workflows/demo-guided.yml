@@ -191,19 +191,21 @@ jobs:
           ls -la "$RUN_DIR" | sed 's/^/RUN_DIR: /'
 
       - name: Append mini-report to summary
+        shell: bash
         run: |
           set -euo pipefail
-          cat >>"$GITHUB_STEP_SUMMARY" <<'EOS'
-          ### Report
-
-          - model: `${GROQ_MODEL}`
-          - trials: `${TRIALS}`
-          - dry_run: `${DRY_RUN}`
-
-          - ${RUN_DIR}/index.html
-          - ${RUN_DIR}/summary.csv
-          - ${RUN_DIR}/summary.svg
-          EOS
+          : "${GROQ_MODEL:?}"; : "${TRIALS:?}"; : "${DRY_RUN:?}"; : "${RUN_DIR:?}"
+          {
+            echo "### Report"
+            echo
+            echo "- model: \`${GROQ_MODEL}\`"
+            echo "- trials: \`${TRIALS}\`"
+            echo "- dry_run: \`${DRY_RUN}\`"
+            echo
+            echo "- ${RUN_DIR}/index.html"
+            echo "- ${RUN_DIR}/summary.csv"
+            echo "- ${RUN_DIR}/summary.svg"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Verify artifacts
         run: |
