@@ -9,6 +9,40 @@ if str(repo_root) not in sys.path:
     sys.path.insert(0, str(repo_root))
 # --- end bootstrap ---
 
+
+# === begin: robust input discovery ===
+def _first_match(run_dir: Path, pattern: str) -> Path | None:
+    try:
+        for p in run_dir.glob(pattern):
+            if p.is_file():
+                return p
+    except Exception:
+        pass
+    return None
+
+
+def locate_inputs(run_dir: Path) -> tuple[Path | None, Path | None]:
+    """
+    Return (run_json_path, rows_jsonl_path), preferring top-level but
+    falling back to first nested match. If both exist in different parents,
+    prefer the pair that share a parent directory.
+    """
+
+    # Prefer top-level first
+    top_run = run_dir / "run.json"
+    top_rows = run_dir / "rows.jsonl"
+    run_json = top_run if top_run.is_file() else _first_match(run_dir, "**/run.json")
+    rows_jl = top_rows if top_rows.is_file() else _first_match(run_dir, "**/rows.jsonl")
+
+    # If mismatched parents, try to co-locate next to rows.jsonl
+    if run_json and rows_jl and run_json.parent != rows_jl.parent:
+        coloc = rows_jl.parent / "run.json"
+        if coloc.is_file():
+            run_json = coloc
+    return run_json, rows_jl
+# === end: robust input discovery ===
+
+
 def resolve_run_dir(path: Path) -> Path:
     """Resolve symlinks and fallback pointer files like results/LATEST.path."""
 
@@ -43,32 +77,6 @@ def load_summary(run_dir: Path):
         except Exception:
             pass
     return "none", {}
-
-
-def _discover_run_and_rows(run_dir: Path) -> Tuple[Optional[Path], Optional[Path]]:
-    """Locate run.json and rows.jsonl, allowing for nested slice folders."""
-
-    # Gather candidates deterministically for reproducibility.
-    run_json_candidates = sorted(run_dir.rglob("run.json"))
-    rows_candidates = sorted(run_dir.rglob("rows.jsonl"))
-
-    selected_run_json: Optional[Path] = None
-    selected_rows: Optional[Path] = None
-
-    if run_json_candidates:
-        # Default to the first path but prefer one whose parent also has rows.jsonl.
-        selected_run_json = run_json_candidates[0]
-        for cand in run_json_candidates:
-            if (cand.parent / "rows.jsonl").exists():
-                selected_run_json = cand
-                break
-
-    if selected_run_json and (selected_run_json.parent / "rows.jsonl").exists():
-        selected_rows = selected_run_json.parent / "rows.jsonl"
-    elif rows_candidates:
-        selected_rows = rows_candidates[0]
-
-    return selected_run_json, selected_rows
 
 
 def _extract_from_run_json(data: dict, run_meta: dict) -> None:
@@ -139,13 +147,32 @@ def main():
 
     mode, data = load_summary(run_dir)
 
-    run_json_path, rows_path = _discover_run_and_rows(run_dir)
-    run_meta = {}
-    if run_json_path and run_json_path.exists():
+    run_json_path, rows_path = locate_inputs(run_dir)
+
+    run_meta: dict = {}
+    model = seed = "unknown"
+    if run_json_path:
         try:
             run_meta = json.loads(run_json_path.read_text(encoding="utf-8"))
+            model = run_meta.get("model", run_meta.get("config", {}).get("model", "unknown"))
+            seed = run_meta.get("seed", run_meta.get("config", {}).get("seed", "unknown"))
         except Exception:
             run_meta = {}
+
+    rows_preview: list[dict] = []
+    if rows_path:
+        try:
+            with rows_path.open("r", encoding="utf-8") as fh:
+                for i, line in enumerate(fh):
+                    if i >= 5000:
+                        break
+                    try:
+                        rows_preview.append(json.loads(line))
+                    except Exception:
+                        continue
+        except Exception:
+            rows_preview = []
+
     if run_meta:
         if mode != "json":
             # Keep original structure for csv/none modes while surfacing metadata.
@@ -153,6 +180,19 @@ def main():
             if mode == "csv":
                 data.setdefault("csv_rows", [])
         _extract_from_run_json(data, run_meta)
+    else:
+        # Populate best-effort metadata even if run.json failed to parse.
+        if mode == "json":
+            data = dict(data)
+            data.setdefault("model", model)
+            data.setdefault("seed", seed)
+        elif mode == "csv":
+            data = dict(data)
+            rows = list(data.get("csv_rows", []))
+            if rows:
+                rows[0].setdefault("model", model)
+                rows[0].setdefault("seed", seed)
+            data["csv_rows"] = rows
 
 
     # Import template renderer safely
@@ -164,11 +204,15 @@ def main():
         return
     render_html = html_report.render_html  # type: ignore[attr-defined]
 
-    if rows_path:
+    if rows_path or rows_preview:
         fallback_rows = rows_path
 
         def _read_rows_jsonl_override(target_dir: Path, limit: int = 50):
-            candidates = []
+            if rows_preview:
+                cap = min(limit, len(rows_preview))
+                return rows_preview[:cap]
+
+            candidates: list[Path | None] = []
             default = target_dir / "rows.jsonl"
             if fallback_rows and fallback_rows != default:
                 candidates.append(fallback_rows)
@@ -181,7 +225,7 @@ def main():
                 try:
                     with candidate.open(encoding="utf-8") as f:
                         for i, line in enumerate(f):
-                            if i >= limit:
+                            if i >= limit or i >= 5000:
                                 break
                             try:
                                 obj = json.loads(line)
