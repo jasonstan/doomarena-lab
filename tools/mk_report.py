@@ -11,9 +11,17 @@ from __future__ import annotations
 import csv
 import json
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Iterable, Optional, Dict, Any, List, Tuple
+
+try:
+    from tools.report.html_report import ReportContext, TrialRecord, render_report
+except ModuleNotFoundError:  # pragma: no cover - fallback when executed as a script
+    repo_root = Path(__file__).resolve().parent.parent
+    if str(repo_root) not in sys.path:
+        sys.path.append(str(repo_root))
+    from tools.report.html_report import ReportContext, TrialRecord, render_report
 
 RunDir = Path
 
@@ -119,15 +127,26 @@ class Meta:
     seed: Optional[int] = None
     trials: Optional[int] = None
     started_at: Optional[str] = None
+    raw: Dict[str, Any] = field(default_factory=dict)
 
 def extract_meta(run_dir: RunDir) -> Meta:
     # Prefer top-level run.json; fallback to any nested run.json
     run_json = find_first(run_dir, ["run.json"]) or find_glob_first(run_dir, ["*/run.json"])
     meta = Meta()
     data = read_json(run_json) or {}
+    meta.raw = data if isinstance(data, dict) else {}
     # Common places
-    meta.model = data.get("model") or data.get("config", {}).get("model")
-    meta.seed = data.get("seed") or data.get("config", {}).get("seed")
+    meta.model = (
+        data.get("provider", {}).get("model")
+        or data.get("model")
+        or data.get("config", {}).get("model")
+    )
+    meta.seed = (
+        data.get("seed")
+        or data.get("rng_seed")
+        or data.get("config", {}).get("seed")
+        or data.get("config", {}).get("rng_seed")
+    )
     meta.trials = data.get("trials") or data.get("config", {}).get("trials")
     meta.started_at = data.get("started_at") or data.get("ts") or data.get("time")
     # Fallback: from summary.csv
@@ -169,12 +188,16 @@ def compute_asr(run_dir: RunDir, summary_row: Optional[Dict[str, Any]]) -> Optio
             return ok / total
     return None
 
-def load_rows_anywhere(run_dir: RunDir, limit: Optional[int] = 25) -> List[Dict[str, Any]]:
-    # Prefer top-level rows.jsonl/rows.json; else any nested *rows.jsonl
-    cand = (
+def find_rows_path(run_dir: RunDir) -> Optional[Path]:
+    return (
         find_first(run_dir, ["rows.jsonl", "rows.json"])
         or find_glob_first(run_dir, ["*/rows.jsonl", "*/*/rows.jsonl", "*/rows.json", "*/*/rows.json"])
     )
+
+
+def load_rows_anywhere(run_dir: RunDir, limit: Optional[int] = 25) -> List[Dict[str, Any]]:
+    # Prefer top-level rows.jsonl/rows.json; else any nested *rows.jsonl
+    cand = find_rows_path(run_dir)
     if cand and cand.suffix == ".json":
         try:
             data = read_json(cand)
@@ -185,128 +208,61 @@ def load_rows_anywhere(run_dir: RunDir, limit: Optional[int] = 25) -> List[Dict[
             return []
     return read_jsonl(cand, limit=limit)
 
-# -------------- HTML --------------
-CSS = """
-  body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Helvetica,Arial,sans-serif;line-height:1.45;margin:24px;}
-  h1{margin:0 0 8px 0}
-  .badges{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 16px}
-  .badge{background:#f2f4f7;border:1px solid #e4e7ec;border-radius:999px;padding:4px 10px;font-size:12px}
-  .kv{display:grid;grid-template-columns:120px 1fr;gap:6px;align-items:start;margin:8px 0 16px}
-  .section{margin:24px 0}
-  .muted{color:#667085}
-  table{border-collapse:collapse;width:100%;margin-top:8px}
-  th,td{border:1px solid #e4e7ec;padding:6px 8px;font-size:13px;vertical-align:top}
-  th{background:#f8fafc;text-align:left}
-  code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace}
-  .io{max-height:8.5em;overflow:auto;white-space:pre-wrap}
-  img.summary{max-width:520px;width:100%;height:auto;border:1px solid #e4e7ec;border-radius:8px;background:#fff}
-"""
+TRIAL_SAMPLE_LIMIT = 50
+
+
+def sample_trial_rows(rows_path: Optional[Path], limit: int = TRIAL_SAMPLE_LIMIT) -> Tuple[List[TrialRecord], int]:
+    if not rows_path or not rows_path.exists():
+        return [], 0
+
+    records: List[TrialRecord] = []
+    total = 0
+    try:
+        with rows_path.open("r", encoding="utf-8") as handle:
+            for raw_line in handle:
+                line = raw_line.strip()
+                if not line:
+                    continue
+                try:
+                    payload = json.loads(line)
+                except ValueError:
+                    continue
+                if not isinstance(payload, dict):
+                    continue
+                total += 1
+                if len(records) < limit:
+                    records.append(TrialRecord(index=total, payload=payload))
+    except OSError:
+        pass
+    return records, total
+
 
 def render_html(run_dir: RunDir) -> str:
     row_csv = read_summary_csv(run_dir / "summary.csv")
     meta = extract_meta(run_dir)
     asr = compute_asr(run_dir, row_csv)
 
-    # Trial rows (first N)
-    trials = load_rows_anywhere(run_dir, limit=25)
+    rows_path = find_rows_path(run_dir)
+    trial_records, total_trials = sample_trial_rows(rows_path, TRIAL_SAMPLE_LIMIT)
 
-    # Pull candidate I/O fields
-    def pick(d: Dict[str, Any], keys: Tuple[str, ...]) -> Optional[str]:
-        for k in keys:
-            if k in d and d[k] not in (None, ""):
-                v = d[k]
-                return v if isinstance(v, str) else json.dumps(v, ensure_ascii=False)
-        return None
+    run_meta_payload: Dict[str, Any] = {}
+    if meta.raw:
+        run_meta_payload = meta.raw
+    else:
+        run_meta_payload = asdict(meta)
 
-    # Build table rows
-    table_rows: List[str] = []
-    for i, r in enumerate(trials):
-        trial_id = r.get("trial_id") or r.get("idx") or i
-        prompt = pick(r, ("input", "prompt", "attack_prompt", "user", "message"))
-        output = pick(r, ("output", "response", "model", "assistant"))
-        success = r.get("success")
-        reason = r.get("reason") or r.get("judge_reason") or r.get("why")
-        table_rows.append(
-            "<tr>"
-            f"<td>{trial_id}</td>"
-            f"<td class='io'><pre>{html_escape(prompt or '')}</pre></td>"
-            f"<td class='io'><pre>{html_escape(output or '')}</pre></td>"
-            f"<td>{html_escape(str(success))}</td>"
-            f"<td class='io'><pre>{html_escape(str(reason or ''))}</pre></td>"
-            "</tr>"
-        )
-
-    # Summary SVG (if present)
-    svg_tag = ""
-    if (run_dir / "summary.svg").exists():
-        svg_tag = "<img class='summary' src='summary.svg' alt='Summary chart'/>"
-
-    # Badges
-    badges = []
-    if asr is not None:
-        badges.append(f"<span class='badge'>ASR: {asr:.6g}</span>")
-    if meta.model:
-        badges.append(f"<span class='badge'>model: {html_escape(meta.model)}</span>")
-    if meta.seed is not None:
-        badges.append(f"<span class='badge'>seed: {meta.seed}</span>")
-    if meta.trials is not None:
-        badges.append(f"<span class='badge'>trials: {meta.trials}</span>")
-    if meta.started_at:
-        badges.append(f"<span class='badge'>started: {html_escape(str(meta.started_at))}</span>")
-    badges_html = f"<div class='badges'>{''.join(badges)}</div>" if badges else ""
-
-    # Trial table HTML
-    table_html = (
-        "<p class='muted'>No per-trial rows available.</p>"
-        if not table_rows
-        else (
-            "<table><thead><tr>"
-            "<th>#</th><th>Prompt</th><th>Model output</th><th>Success</th><th>Reason</th>"
-            "</tr></thead><tbody>"
-            + "".join(table_rows)
-            + "</tbody></table>"
-        )
+    context = ReportContext(
+        run_dir=run_dir,
+        run_meta=run_meta_payload,
+        summary_row=row_csv,
+        asr=asr,
+        trial_records=trial_records,
+        total_trials=total_trials,
+        trial_limit=TRIAL_SAMPLE_LIMIT,
+        rows_path=rows_path,
     )
 
-    # Artifact links (always)
-    artifacts = []
-    for name in ("summary.csv", "summary.svg", "run.json", "rows.jsonl"):
-        p = run_dir / name
-        if p.exists():
-            artifacts.append(f"<li><a href='{name}'>{name}</a></li>")
-    artifacts_html = "<ul>" + "".join(artifacts) + "</ul>" if artifacts else "<p class='muted'>None</p>"
-
-    return f"""<!doctype html>
-<meta charset="utf-8"/>
-<title>DoomArena-Lab Report — {run_dir.name}</title>
-<style>{CSS}</style>
-<h1>DoomArena-Lab Report</h1>
-<div class="muted">Run: {run_dir.name}</div>
-{badges_html}
-
-<div class="section">
-  {svg_tag}
-</div>
-
-<div class="section">
-  <h2>Trial I/O (first {len(table_rows)} rows)</h2>
-  {table_html}
-</div>
-
-<div class="section">
-  <h2>Artifacts</h2>
-  {artifacts_html}
-</div>
-"""
-
-def html_escape(s: str) -> str:
-    return (
-        s.replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace('"', "&quot;")
-        .replace("'", "&#39;")
-    )
+    return render_report(context)
 
 def main(argv: List[str]) -> int:
     if len(argv) != 2:
