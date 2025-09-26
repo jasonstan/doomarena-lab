@@ -192,22 +192,18 @@ jobs:
 
       - name: Append mini-report to summary
         run: |
-          set -euxo pipefail
-          SUM="${GITHUB_STEP_SUMMARY}"
-          RD="${RUN_DIR}"
+          set -euo pipefail
+          cat >>"$GITHUB_STEP_SUMMARY" <<'EOS'
+          ### Report
 
-          # Header
-          printf '### Report\n\n' >> "$SUM"
+          - model: `${GROQ_MODEL}`
+          - trials: `${TRIALS}`
+          - dry_run: `${DRY_RUN}`
 
-          # Quick context
-          printf '- model: `%s`\n' "$GROQ_MODEL"    >> "$SUM"
-          printf '- trials: `%s`\n' "$TRIALS"       >> "$SUM"
-          printf '- dry_run: `%s`\n\n' "$DRY_RUN"   >> "$SUM"
-
-          # Artifacts (plain paths render as links in the run page)
-          printf '- %s/index.html\n'   "$RD" >> "$SUM"
-          printf '- %s/summary.csv\n'  "$RD" >> "$SUM"
-          printf '- %s/summary.svg\n'  "$RD" >> "$SUM"
+          - ${RUN_DIR}/index.html
+          - ${RUN_DIR}/summary.csv
+          - ${RUN_DIR}/summary.svg
+          EOS
 
       - name: Verify artifacts
         run: |
