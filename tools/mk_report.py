@@ -41,6 +41,7 @@ def main():
 
     mode, data = load_summary(run_dir)
 
+    # Import template renderer safely
     try:
         from tools.report.html_report import render_html  # type: ignore
     except Exception as e:
@@ -48,6 +49,7 @@ def main():
         print(f"Wrote {out_path} (degraded: import error)")
         return
 
+    # Attempt full render; fall back to degraded on any error
     try:
         html = render_html(run_dir, data, mode=mode)
     except Exception as e:

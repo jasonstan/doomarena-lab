@@ -159,6 +159,7 @@
       a:hover {
         text-decoration: underline;
       }
+      $INLINE_CHART_CSS
       @media (prefers-color-scheme: dark) {
         body {
           background: #111827;
@@ -209,7 +210,7 @@
       $OVERVIEW
     </section>
     <section>
-      <h2>Summary chart</h2>
+      <h2>Attack result (ASR)</h2>
       $SUMMARY_CHART
     </section>
     <section>
@@ -217,8 +218,12 @@
       $SUMMARY_TABLE
     </section>
     <section>
-      <h2>Top gate reasons</h2>
+      <h2>Why were decisions made?</h2>
       $TOP_REASONS
+    </section>
+    <section>
+      <h2>Trial I/O</h2>
+      $TRIAL_TABLE
     </section>
     <section>
       <h2>Artifacts</h2>
