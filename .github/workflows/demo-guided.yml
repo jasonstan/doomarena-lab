@@ -155,6 +155,8 @@ jobs:
           echo "RUN_DIR=$RUN_DIR" | tee -a "$GITHUB_ENV"
 
       - name: Ensure report exists (fallback render)
+        env:
+          PYTHONPATH: ${{ github.workspace }}
         run: |
           set -euxo pipefail
           [ -d "$RUN_DIR" ] || (echo "Run dir not found: $RUN_DIR" >&2; exit 1)
