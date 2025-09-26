@@ -5,7 +5,53 @@ import sys
 from itertools import chain
 from pathlib import Path
 from string import Template
-from typing import Iterable, Iterator
+from typing import Iterable, Iterator, Optional, Tuple
+
+
+def load_summary(run_dir: Path) -> Tuple[str, dict[str, object]]:
+    """Load summary data for the HTML renderer.
+
+    Prefer ``summary_index.json`` when available, otherwise fall back to
+    ``summary.csv`` so the renderer has at least a small payload.  Any parse
+    failure results in an empty payload, but the caller can still generate a
+    degraded report.
+    """
+
+    summary_json = run_dir / "summary_index.json"
+    if summary_json.exists():
+        try:
+            data = json.loads(summary_json.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                return "json", data
+        except Exception:
+            pass
+
+    summary_csv = run_dir / "summary.csv"
+    if summary_csv.exists():
+        try:
+            with summary_csv.open(encoding="utf-8") as handle:
+                rows = list(csv.DictReader(handle))
+            return "csv", {"csv_rows": rows}
+        except Exception:
+            pass
+
+    return "none", {}
+
+
+def _degraded_html(run_dir: Path, err: Optional[Exception] = None) -> str:
+    message = f"{type(err).__name__}: {err}" if err else "no data"
+    return f"""<!doctype html><meta charset="utf-8">
+<title>DoomArena-Lab Report (degraded)</title>
+<h1>Report (degraded)</h1>
+<p>Could not render full report ({html.escape(message)}).</p>
+<p>Artifacts are in <code>{html.escape(run_dir.name)}</code>.</p>
+<ul>
+  <li><code>summary.csv</code></li>
+  <li><code>summary.svg</code></li>
+  <li><code>rows.jsonl</code></li>
+  <li><code>run.json</code></li>
+</ul>
+"""
 
 
 TEMPLATE_PATH = Path(__file__).resolve().parent.parent / "reports" / "templates" / "index.html"
@@ -754,8 +800,7 @@ def render_template(context: dict[str, str]) -> str:
     return tmpl.safe_substitute(context)
 
 
-def write_report(run_dir: Path) -> None:
-    run_dir = resolve_run_dir(run_dir)
+def _render_builtin_html(run_dir: Path) -> str:
     headers, rows = read_rows(run_dir / "summary.csv")
     table_html = build_table(headers, rows)
     meta = load_run_meta(run_dir)
@@ -803,10 +848,45 @@ def write_report(run_dir: Path) -> None:
         "ARTIFACT_LINKS": build_artifact_links(run_dir, report),
     }
 
-    html_doc = render_template(context)
+    return render_template(context)
+
+
+def write_report(run_dir: Path) -> None:
+    run_dir = resolve_run_dir(run_dir)
     output = run_dir / "index.html"
+
+    mode, summary_data = load_summary(run_dir)
+
+    try:
+        from tools.report.html_report import render_html  # type: ignore[attr-defined]
+    except Exception as import_err:
+        render_html = None  # type: ignore[assignment]
+        import_error: Optional[Exception] = import_err
+    else:
+        import_error = None
+
+    degraded = False
+
+    if render_html is not None:
+        try:
+            html_doc = render_html(run_dir, summary_data, mode=mode)
+            if not isinstance(html_doc, str):
+                html_doc = str(html_doc)
+        except Exception as err:  # pragma: no cover - safety fallback
+            html_doc = _degraded_html(run_dir, err)
+            degraded = True
+    else:
+        try:
+            html_doc = _render_builtin_html(run_dir)
+        except Exception as err:  # pragma: no cover - safety fallback
+            html_doc = _degraded_html(run_dir, import_error or err)
+            degraded = True
+
     output.write_text(html_doc, encoding="utf-8")
-    print(f"Wrote {output}")
+    if degraded:
+        print(f"Wrote {output} (degraded)")
+    else:
+        print(f"Wrote {output}")
 
 
 def main(argv: list[str]) -> int:
