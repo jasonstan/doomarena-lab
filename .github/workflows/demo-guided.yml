@@ -126,6 +126,17 @@ PY
           [ -n "${RUN_DIR:-}" ] && [ -d "$RUN_DIR" ] || { echo "ERROR: Unable to determine RUN_DIR"; ls -la results || true; exit 1; }
           echo "RUN_DIR=$RUN_DIR" | tee -a "$GITHUB_ENV"
 
+      - name: Ensure report exists (fallback render)
+        run: |
+          set -euxo pipefail
+          [ -d "$RUN_DIR" ] || (echo "Run dir not found: $RUN_DIR" >&2; exit 1)
+          # If index.html is missing or empty, (re)build it from available summary files.
+          if [ ! -s "$RUN_DIR/index.html" ]; then
+            python tools/mk_report.py "$RUN_DIR" || true
+          fi
+          # Show what we have for quick debugging
+          ls -la "$RUN_DIR" | sed 's/^/RUN_DIR: /'
+
       - name: Verify artifacts
         run: |
           set -euxo pipefail
