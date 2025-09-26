@@ -146,8 +146,14 @@ jobs:
           test -s "$RUN_DIR/index.html"
           test -s "$RUN_DIR/summary.csv"
           test -s "$RUN_DIR/summary.svg"
-          echo "### Artifacts" >> $GITHUB_STEP_SUMMARY
-          printf "- %s/index.html\n- %s/summary.csv\n- %s/summary.svg\n" "$RUN_DIR" "$RUN_DIR" "$RUN_DIR" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "### Artifacts"
+            cat <<EOF
+            - $RUN_DIR/index.html
+            - $RUN_DIR/summary.csv
+            - $RUN_DIR/summary.svg
+            EOF
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload per-run artifacts
         uses: actions/upload-artifact@v4
