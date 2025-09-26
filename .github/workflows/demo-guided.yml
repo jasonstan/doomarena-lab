@@ -178,7 +178,7 @@ jobs:
       - name: Append mini-report to summary
         run: |
           set -euo pipefail
-          python - <<'PY' "${RUN_DIR}"
+          python - "$RUN_DIR" <<'PY' >>"$GITHUB_STEP_SUMMARY"
           import csv, json, sys, pathlib
           run_dir = pathlib.Path(sys.argv[1])
           def find(pattern):
@@ -212,7 +212,7 @@ jobs:
           print(f"- **Model**: `{model}`  ·  **Seed**: `{seed}`")
           print(f"- **Pass-rate**: `{succ}/{trials}`  (ASR = `{asr}`)")
           print(f"- **Artifacts**: `{run_dir}/index.html`, `{run_dir}/summary.csv`, `{run_dir}/summary.svg`")
-          PY >> "$GITHUB_STEP_SUMMARY"
+          PY
 
       - name: Verify artifacts
         run: |
