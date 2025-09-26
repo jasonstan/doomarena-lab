@@ -215,7 +215,24 @@ def sample_trial_rows(rows_path: Optional[Path], limit: int = TRIAL_SAMPLE_LIMIT
     if not rows_path or not rows_path.exists():
         return [], 0
 
-    records: List[TrialRecord] = []
+    # Legacy runs may store a single JSON array (rows.json) instead of JSONL.
+    if rows_path.suffix == ".json":
+        try:
+            payload = read_json(rows_path)
+        except Exception:
+            payload = None
+        if isinstance(payload, list):
+            total = 0
+            records: List[TrialRecord] = []
+            for entry in payload:
+                if not isinstance(entry, dict):
+                    continue
+                total += 1
+                if len(records) < limit:
+                    records.append(TrialRecord(index=total, payload=entry))
+            return records, total
+
+    records = []
     total = 0
     try:
         with rows_path.open("r", encoding="utf-8") as handle:
