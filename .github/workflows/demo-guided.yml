@@ -181,18 +181,11 @@ jobs:
           # Try to render the full HTML report (non-fatal)
           python tools/mk_report.py "$RUN_DIR" || true
 
-          # If still missing, write a minimal degraded page via a safe, aligned heredoc
+          # If still missing, write a minimal degraded page (no heredoc; avoid YAML pitfalls)
           if [ ! -s "$RUN_DIR/index.html" ]; then
-            python - "$RUN_DIR" <<'PY'
-from pathlib import Path
-import sys
-rd = Path(sys.argv[1])
-html = rd / "index.html"
-html.write_text(
-    f"<h1>Report (degraded)</h1><p>Artifacts are in {rd.name}.</p>",
-    encoding="utf-8",
-)
-PY
+            printf '<!doctype html><meta charset="utf-8">\n'                    >  "$RUN_DIR/index.html"
+            printf '<h1>Report (degraded)</h1>\n'                               >> "$RUN_DIR/index.html"
+            printf '<p>Artifacts are in %s.</p>\n' "$RUN_DIR"                   >> "$RUN_DIR/index.html"
           fi
 
           ls -la "$RUN_DIR" | sed 's/^/RUN_DIR: /'
