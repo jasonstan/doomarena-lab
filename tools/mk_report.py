@@ -1,295 +1,245 @@
-#!/usr/bin/env python3
-"""
-Richer, layout-agnostic HTML report writer.
-Works with either:
-  • legacy: results/<RUN_ID>/{summary_index.json, <exp>/rows.jsonl}
-  • current: results/<RUN_ID>/{summary.csv, summary.svg, run.json[, rows.jsonl]}
-Also tolerates rows.jsonl living under a child directory (e.g., <exp>/rows.jsonl).
-"""
 from __future__ import annotations
 
-import csv
 import json
 import sys
-from dataclasses import dataclass, field, asdict
 from pathlib import Path
-from typing import Iterable, Optional, Dict, Any, List, Tuple
+from typing import Any, Dict, Iterator, Optional, Tuple
 
 try:
-    from tools.report.html_report import ReportContext, TrialRecord, render_report
-except ModuleNotFoundError:  # pragma: no cover - fallback when executed as a script
-    repo_root = Path(__file__).resolve().parent.parent
-    if str(repo_root) not in sys.path:
-        sys.path.append(str(repo_root))
-    from tools.report.html_report import ReportContext, TrialRecord, render_report
+    from tools.report.html_utils import esc, preview_block
+except Exception:  # fallback for older runners
+    import html
 
-RunDir = Path
+    def esc(s: object) -> str:
+        if s is None:
+            return ""
+        return html.escape(str(s), quote=True)
+
+    def preview_block(full_text: str, max_len: int = 160) -> str:
+        text = full_text or ""
+        short = (text[:max_len] + "…") if len(text) > max_len else text
+        return (
+            f"<details><summary><code>{esc(short)}</code></summary>"
+            f"<pre style='white-space:pre-wrap'>{esc(text)}</pre></details>"
+        )
 
 
-def resolve_run_dir(requested: Path) -> Path:
-    """Resolve the run directory, following LATEST.path pointers when needed."""
+def _read_jsonl_lines(p: Path) -> Iterator[Dict[str, Any]]:
+    with p.open("r", encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                yield json.loads(line)
+            except Exception:
+                continue
 
-    requested = Path(requested)
 
+def _join_user_messages(messages: Any) -> Optional[str]:
+    if not isinstance(messages, list):
+        return None
+    parts = []
+    for m in messages:
+        if isinstance(m, dict) and m.get("role") in ("user", "system"):
+            content = m.get("content")
+            if isinstance(content, str):
+                parts.append(content)
+            elif isinstance(content, list):
+                for b in content:
+                    if isinstance(b, dict) and b.get("type") == "text":
+                        parts.append(str(b.get("text", "")))
+    return "\n".join(p for p in parts if p) or None
+
+
+def _openai_like(raw: Any) -> Optional[str]:
     try:
-        resolved = requested.resolve(strict=False)
+        return raw["choices"][0]["message"]["content"]
     except Exception:
-        resolved = requested
-
-    if resolved.exists():
-        return resolved
-
-    pointer = requested.parent / f"{requested.name}.path"
-    if pointer.exists():
         try:
-            target_text = pointer.read_text(encoding="utf-8").strip()
+            return raw["choices"][0]["text"]
         except Exception:
-            target_text = ""
-        if target_text:
-            target = Path(target_text)
-            if not target.is_absolute():
-                target = (pointer.parent / target).resolve()
-            return target
+            return None
 
-    return resolved
 
-# -------------- helpers --------------
-def find_first(base: Path, names: Iterable[str]) -> Optional[Path]:
-    for n in names:
-        p = base / n
+def _extract_prompt(row: Dict[str, Any]) -> Optional[str]:
+    for key in ("input_text", "input", "attack_prompt", "prompt"):
+        val = row.get(key)
+        if isinstance(val, str) and val.strip():
+            return val
+    prom = _join_user_messages(row.get("messages"))
+    if prom:
+        return prom
+    ic = row.get("input_case")
+    if isinstance(ic, dict):
+        v = ic.get("attack_prompt")
+        if isinstance(v, str) and v.strip():
+            return v
+    return None
+
+
+def _extract_response(row: Dict[str, Any]) -> Optional[str]:
+    for key in ("output_text", "output", "response", "model_output"):
+        val = row.get(key)
+        if isinstance(val, str) and val.strip():
+            return val
+    raw = row.get("raw_output")
+    txt = _openai_like(raw)
+    if isinstance(txt, str) and txt.strip():
+        return txt
+    return None
+
+
+def _read_model_seed(run_dir: Path) -> Tuple[Optional[str], Optional[str]]:
+    run_json = run_dir / "run.json"
+    model = seed = None
+    if run_json.exists():
+        try:
+            meta = json.loads(run_json.read_text(encoding="utf-8"))
+            model = (
+                meta.get("config", {}).get("provider", {}).get("model")
+                or meta.get("provider_model")
+                or meta.get("model")
+            )
+            seed = str(
+                meta.get("config", {}).get("seed")
+                or meta.get("seed")
+                or ""
+            ) or None
+        except Exception:
+            pass
+    return model, seed
+
+
+def _find_rows_file(run_dir: Path) -> Optional[Path]:
+    direct = run_dir / "rows.jsonl"
+    if direct.exists():
+        return direct
+    for candidate in run_dir.rglob("rows.jsonl"):
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def render_trial_io_table(run_dir: Path) -> str:
+    rows_path = _find_rows_file(run_dir)
+    if not rows_path:
+        return "<p><em>No per-trial rows found (rows.jsonl missing).</em></p>"
+
+    lines = []
+    lines.append("<h2>Trial I/O (raw prompts &amp; responses)</h2>")
+    lines.append("<p>Previews are truncated; expand a row to see the full text.</p>")
+    lines.append(
+        "<table style='width:100%; border-collapse:collapse'>"
+        "<thead><tr>"
+        "<th style='text-align:left; border-bottom:1px solid #ddd;'>#</th>"
+        "<th style='text-align:left; border-bottom:1px solid #ddd;'>Attack prompt</th>"
+        "<th style='text-align:left; border-bottom:1px solid #ddd;'>Model response</th>"
+        "<th style='text-align:left; border-bottom:1px solid #ddd;'>Success</th>"
+        "<th style='text-align:left; border-bottom:1px solid #ddd;'>Gate</th>"
+        "</tr></thead><tbody>"
+    )
+
+    idx = 0
+    for row in _read_jsonl_lines(rows_path):
+        idx += 1
+        prompt = _extract_prompt(row) or ""
+        response = _extract_response(row) or ""
+        success = row.get("success")
+        pre = row.get("pre_gate")
+        post = row.get("post_gate")
+        pre_str = str(pre) if pre not in (None, "") else "-"
+        post_str = str(post) if post not in (None, "") else "-"
+        gate = esc(f"{pre_str}/{post_str}")
+        success_str = "✅" if success is True else ("❌" if success is False else "–")
+
+        lines.append(
+            "<tr>"
+            f"<td style='vertical-align:top; padding:6px 8px'>{idx}</td>"
+            f"<td style='vertical-align:top; padding:6px 8px'>{preview_block(prompt)}</td>"
+            f"<td style='vertical-align:top; padding:6px 8px'>{preview_block(response)}</td>"
+            f"<td style='vertical-align:top; padding:6px 8px'>{success_str}</td>"
+            f"<td style='vertical-align:top; padding:6px 8px'><code>{gate}</code></td>"
+            "</tr>"
+        )
+
+    lines.append("</tbody></table>")
+    return "\n".join(lines)
+
+
+def _append_badges(run_dir: Path) -> str:
+    model, seed = _read_model_seed(run_dir)
+    bits = []
+    if model:
+        bits.append(
+            "<span style='padding:2px 8px;border:1px solid #ddd;border-radius:12px;'>Model: "
+            f"<code>{esc(model)}</code></span>"
+        )
+    if seed:
+        bits.append(
+            "<span style='padding:2px 8px;border:1px solid #ddd;border-radius:12px;margin-left:8px;'>Seed: "
+            f"<code>{esc(seed)}</code></span>"
+        )
+    if not bits:
+        return ""
+    return "<p>" + " ".join(bits) + "</p>"
+
+
+def _read_file_safe(p: Path) -> str:
+    try:
+        return p.read_text(encoding="utf-8")
+    except Exception:
+        return ""
+
+
+def build_full_html(run_dir: Path) -> str:
+    summary_svg = run_dir / "summary.svg"
+
+    parts = []
+    parts.append("<!doctype html><meta charset='utf-8'>")
+    parts.append("<title>DoomArena-Lab Report</title>")
+    parts.append(
+        "<style>body{font-family:ui-sans-serif,system-ui,Segoe UI,Roboto,Helvetica,Arial}"
+        "table td,table th{font-size:12.5px}</style>"
+    )
+    parts.append("<h1>DoomArena-Lab Report</h1>")
+    parts.append(_append_badges(run_dir))
+
+    if summary_svg.exists():
+        parts.append("<h2>Pass/Fail overview</h2>")
+        parts.append(_read_file_safe(summary_svg))
+
+    parts.append(render_trial_io_table(run_dir))
+
+    parts.append("<h2>Artifacts</h2><ul>")
+    for name in ("summary.csv", "summary.svg", "rows.jsonl", "run.json"):
+        p = run_dir / name
         if p.exists():
-            return p
-    return None
+            parts.append(f"<li><a href='{esc(str(name))}'>{esc(name)}</a></li>")
+    parts.append("</ul>")
 
-def find_glob_first(base: Path, patterns: Iterable[str]) -> Optional[Path]:
-    for pat in patterns:
-        for p in base.rglob(pat):
-            if p.is_file():
-                return p
-    return None
-
-def read_json(path: Optional[Path]) -> Optional[Dict[str, Any]]:
-    if not path or not path.exists():
-        return None
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return None
-
-def read_jsonl(path: Optional[Path], limit: int | None = None) -> List[Dict[str, Any]]:
-    rows: List[Dict[str, Any]] = []
-    if not path or not path.exists():
-        return rows
-    try:
-        with path.open("r", encoding="utf-8") as f:
-            for i, line in enumerate(f):
-                if limit is not None and i >= limit:
-                    break
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    rows.append(json.loads(line))
-                except Exception:
-                    # tolerate malformed lines
-                    continue
-    except Exception:
-        pass
-    return rows
-
-def read_summary_csv(path: Optional[Path]) -> Optional[Dict[str, Any]]:
-    if not path or not path.exists():
-        return None
-    try:
-        with path.open("r", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            first = next(reader, None)
-            return first
-    except Exception:
-        return None
-
-def coerce_float(x: Any) -> Optional[float]:
-    try:
-        return float(x)
-    except Exception:
-        return None
-
-def coerce_int(x: Any) -> Optional[int]:
-    try:
-        return int(x)
-    except Exception:
-        return None
-
-# -------------- data extraction --------------
-@dataclass
-class Meta:
-    model: Optional[str] = None
-    seed: Optional[int] = None
-    trials: Optional[int] = None
-    started_at: Optional[str] = None
-    raw: Dict[str, Any] = field(default_factory=dict)
-
-def extract_meta(run_dir: RunDir) -> Meta:
-    # Prefer top-level run.json; fallback to any nested run.json
-    run_json = find_first(run_dir, ["run.json"]) or find_glob_first(run_dir, ["*/run.json"])
-    meta = Meta()
-    data = read_json(run_json) or {}
-    meta.raw = data if isinstance(data, dict) else {}
-    # Common places
-    meta.model = (
-        data.get("provider", {}).get("model")
-        or data.get("model")
-        or data.get("config", {}).get("model")
-    )
-    meta.seed = (
-        data.get("seed")
-        or data.get("rng_seed")
-        or data.get("config", {}).get("seed")
-        or data.get("config", {}).get("rng_seed")
-    )
-    meta.trials = data.get("trials") or data.get("config", {}).get("trials")
-    meta.started_at = data.get("started_at") or data.get("ts") or data.get("time")
-    # Fallback: from summary.csv
-    if meta.trials is None:
-        row = read_summary_csv(run_dir / "summary.csv")
-        if row:
-            meta.trials = coerce_int(row.get("trials") or row.get("n") or row.get("count"))
-    return meta
-
-def compute_asr(run_dir: RunDir, summary_row: Optional[Dict[str, Any]]) -> Optional[float]:
-    # 1) CSV explicitly carries asr
-    if summary_row:
-        for key in ("asr", "ASR", "pass_rate", "success_rate"):
-            if key in summary_row and summary_row[key] not in (None, ""):
-                v = coerce_float(summary_row[key])
-                if v is not None:
-                    return v
-        # or successes / trials
-        succ = coerce_int(summary_row.get("successes") or summary_row.get("success"))
-        trials = coerce_int(summary_row.get("trials") or summary_row.get("count"))
-        if succ is not None and trials:
-            return succ / max(trials, 1)
-    # 2) derive from rows.jsonl
-    rows = load_rows_anywhere(run_dir, limit=None)  # full read to compute
-    if rows:
-        ok = 0
-        total = 0
-        for r in rows:
-            val = r.get("success")
-            if isinstance(val, bool):
-                ok += 1 if val else 0
-                total += 1
-            elif val in ("PASS", "SUCCESS", "OK", "True", "true", 1):
-                ok += 1
-                total += 1
-            elif val in ("FAIL", "False", "false", 0):
-                total += 1
-        if total:
-            return ok / total
-    return None
-
-def find_rows_path(run_dir: RunDir) -> Optional[Path]:
-    return (
-        find_first(run_dir, ["rows.jsonl", "rows.json"])
-        or find_glob_first(run_dir, ["*/rows.jsonl", "*/*/rows.jsonl", "*/rows.json", "*/*/rows.json"])
-    )
+    return "\n".join(parts)
 
 
-def load_rows_anywhere(run_dir: RunDir, limit: Optional[int] = 25) -> List[Dict[str, Any]]:
-    # Prefer top-level rows.jsonl/rows.json; else any nested *rows.jsonl
-    cand = find_rows_path(run_dir)
-    if cand and cand.suffix == ".json":
-        try:
-            data = read_json(cand)
-            if isinstance(data, list):
-                return data[: limit or len(data)]
-            return []
-        except Exception:
-            return []
-    return read_jsonl(cand, limit=limit)
-
-TRIAL_SAMPLE_LIMIT = 50
-
-
-def sample_trial_rows(rows_path: Optional[Path], limit: int = TRIAL_SAMPLE_LIMIT) -> Tuple[List[TrialRecord], int]:
-    if not rows_path or not rows_path.exists():
-        return [], 0
-
-    # Legacy runs may store a single JSON array (rows.json) instead of JSONL.
-    if rows_path.suffix == ".json":
-        try:
-            payload = read_json(rows_path)
-        except Exception:
-            payload = None
-        if isinstance(payload, list):
-            total = 0
-            records: List[TrialRecord] = []
-            for entry in payload:
-                if not isinstance(entry, dict):
-                    continue
-                total += 1
-                if len(records) < limit:
-                    records.append(TrialRecord(index=total, payload=entry))
-            return records, total
-
-    records = []
-    total = 0
-    try:
-        with rows_path.open("r", encoding="utf-8") as handle:
-            for raw_line in handle:
-                line = raw_line.strip()
-                if not line:
-                    continue
-                try:
-                    payload = json.loads(line)
-                except ValueError:
-                    continue
-                if not isinstance(payload, dict):
-                    continue
-                total += 1
-                if len(records) < limit:
-                    records.append(TrialRecord(index=total, payload=payload))
-    except OSError:
-        pass
-    return records, total
-
-
-def render_html(run_dir: RunDir) -> str:
-    row_csv = read_summary_csv(run_dir / "summary.csv")
-    meta = extract_meta(run_dir)
-    asr = compute_asr(run_dir, row_csv)
-
-    rows_path = find_rows_path(run_dir)
-    trial_records, total_trials = sample_trial_rows(rows_path, TRIAL_SAMPLE_LIMIT)
-
-    run_meta_payload: Dict[str, Any] = {}
-    if meta.raw:
-        run_meta_payload = meta.raw
-    else:
-        run_meta_payload = asdict(meta)
-
-    context = ReportContext(
-        run_dir=run_dir,
-        run_meta=run_meta_payload,
-        summary_row=row_csv,
-        asr=asr,
-        trial_records=trial_records,
-        total_trials=total_trials,
-        trial_limit=TRIAL_SAMPLE_LIMIT,
-        rows_path=rows_path,
-    )
-
-    return render_report(context)
-
-def main(argv: List[str]) -> int:
-    if len(argv) != 2:
-        print("usage: mk_report.py <RUN_DIR>", file=sys.stderr)
-        return 2
-    run_dir = resolve_run_dir(Path(argv[1]))
+def main(run_dir_arg: str) -> int:
+    run_dir = Path(run_dir_arg).resolve()
     run_dir.mkdir(parents=True, exist_ok=True)
-    html = render_html(run_dir)
-    (run_dir / "index.html").write_text(html, encoding="utf-8")
-    return 0
+    index = run_dir / "index.html"
+    try:
+        html = build_full_html(run_dir)
+        index.write_text(html, encoding="utf-8")
+        return 0
+    except Exception as e:
+        index.write_text(f"<h1>Report (degraded)</h1><pre>{esc(e)}</pre>", encoding="utf-8")
+        return 1
+
+
+def _cli(argv: list[str]) -> int:
+    if len(argv) < 2:
+        print("usage: python tools/mk_report.py <RUN_DIR>", file=sys.stderr)
+        return 2
+    return main(argv[1])
+
 
 if __name__ == "__main__":
-    raise SystemExit(main(sys.argv))
+    sys.exit(_cli(sys.argv))
