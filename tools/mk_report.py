@@ -1,6 +1,12 @@
 from pathlib import Path
 import sys, json, csv
 
+# --- begin bootstrap so `from tools...` works without PYTHONPATH ---
+here = Path(__file__).resolve()
+repo_root = here.parent.parent  # <repo>/tools/.. => <repo>
+if str(repo_root) not in sys.path:
+    sys.path.insert(0, str(repo_root))
+# --- end bootstrap ---
 
 def resolve_run_dir(path: Path) -> Path:
     """Resolve symlinks and fallback pointer files like results/LATEST.path."""
