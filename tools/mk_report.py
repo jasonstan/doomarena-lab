@@ -1,258 +1,139 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+import json, csv, html, sys
 from pathlib import Path
-import sys, json, csv
-from typing import Optional, Tuple
+from typing import Iterable
 
-# --- begin bootstrap so `from tools...` works without PYTHONPATH ---
-here = Path(__file__).resolve()
-repo_root = here.parent.parent  # <repo>/tools/.. => <repo>
-if str(repo_root) not in sys.path:
-    sys.path.insert(0, str(repo_root))
-# --- end bootstrap ---
+# Usage: python tools/mk_report.py RESULTS_DIR
+# Writes: <RESULTS_DIR>/index.html (always)
 
-
-# === begin: robust input discovery ===
-def _first_match(run_dir: Path, pattern: str) -> Path | None:
+def _read_json(p: Path):
     try:
-        for p in run_dir.glob(pattern):
-            if p.is_file():
-                return p
+        return json.loads(p.read_text(encoding="utf-8"))
     except Exception:
-        pass
-    return None
-
-
-def locate_inputs(run_dir: Path) -> tuple[Path | None, Path | None]:
-    """
-    Return (run_json_path, rows_jsonl_path), preferring top-level but
-    falling back to first nested match. If both exist in different parents,
-    prefer the pair that share a parent directory.
-    """
-
-    # Prefer top-level first
-    top_run = run_dir / "run.json"
-    top_rows = run_dir / "rows.jsonl"
-    run_json = top_run if top_run.is_file() else _first_match(run_dir, "**/run.json")
-    rows_jl = top_rows if top_rows.is_file() else _first_match(run_dir, "**/rows.jsonl")
-
-    # If mismatched parents, try to co-locate next to rows.jsonl
-    if run_json and rows_jl and run_json.parent != rows_jl.parent:
-        coloc = rows_jl.parent / "run.json"
-        if coloc.is_file():
-            run_json = coloc
-    return run_json, rows_jl
-# === end: robust input discovery ===
-
-
-def resolve_run_dir(path: Path) -> Path:
-    """Resolve symlinks and fallback pointer files like results/LATEST.path."""
-
-    resolved = path.resolve(strict=False)
-    if resolved.exists():
-        return resolved
-
-    pointer = path.parent / f"{path.name}.path"
-    if pointer.exists():
-        target = Path(pointer.read_text(encoding="utf-8").strip())
-        if target.exists():
-            try:
-                return target.resolve()
-            except Exception:
-                return target
-
-    return resolved
-
-
-def load_summary(run_dir: Path):
-    p_json = run_dir / "summary_index.json"
-    if p_json.exists():
-        try:
-            return "json", json.loads(p_json.read_text(encoding="utf-8"))
-        except Exception:
-            pass
-    p_csv = run_dir / "summary.csv"
-    if p_csv.exists():
-        try:
-            rows = list(csv.DictReader(p_csv.open(encoding="utf-8")))
-            return "csv", {"csv_rows": rows}
-        except Exception:
-            pass
-    return "none", {}
-
-
-def _extract_from_run_json(data: dict, run_meta: dict) -> None:
-    """Populate model/seed fields from run.json metadata when missing."""
-
-    def _first_present(keys: Tuple[str, ...]) -> Optional[str]:
-        for key in keys:
-            parts = key.split(".")
-            node: object = run_meta
-            for part in parts:
-                if isinstance(node, dict) and part in node:
-                    node = node[part]
-                else:
-                    node = None
-                    break
-            if node not in (None, ""):
-                return str(node)
         return None
 
-    # Only override when the current value is missing or "unknown".
-    model = _first_present((
-        "model",
-        "config.model",
-        "real.model",
-        "meta.model",
-    ))
-    current_model = str(data.get("model") or "").strip().lower()
-    if model and (not current_model or current_model == "unknown"):
-        data["model"] = model
+def _read_rows_jsonl(p: Path, limit: int = 25):
+    rows = []
+    try:
+        with p.open("r", encoding="utf-8") as fh:
+            for i, line in enumerate(fh):
+                if not line.strip():
+                    continue
+                try:
+                    rows.append(json.loads(line))
+                except Exception:
+                    pass
+                if i + 1 >= limit:
+                    break
+    except Exception:
+        pass
+    return rows
 
-    seed = _first_present((
-        "seed",
-        "meta.seed",
-        "config.seed",
-        "params.seed",
-    ))
-    current_seed = str(data.get("seed") or "").strip()
-    if seed and (not current_seed or current_seed == "unknown"):
-        data["seed"] = seed
+def _read_summary_csv(p: Path):
+    try:
+        with p.open("r", encoding="utf-8") as fh:
+            return list(csv.DictReader(fh))
+    except Exception:
+        return []
 
-def _degraded_html(run_dir: Path, err: Exception | None = None) -> str:
-    msg = f"{type(err).__name__}: {err}" if err else "no data"
-    return f"""<!doctype html><meta charset="utf-8">
-<title>DoomArena-Lab Report (degraded)</title>
-<h1>Report (degraded)</h1>
-<p>Could not render full report ({msg}).</p>
-<p>Artifacts are in <code>{run_dir.name}</code>.</p>
-<ul>
-  <li><code>summary.csv</code></li>
-  <li><code>summary.svg</code></li>
-  <li><code>rows.jsonl</code></li>
-  <li><code>run.json</code></li>
-</ul>
+def _h(s: str) -> str:
+    return html.escape(s, quote=True)
+
+def _mk_trial_table(rows: Iterable[dict]) -> str:
+    if not rows:
+        return "<p><em>No per-trial rows available.</em></p>"
+    # Try common keys; fall back to first two stringy fields
+    cols = ["attack_id", "attack_prompt", "input", "output", "judge", "pass"]
+    present = [c for c in cols if any(c in r for r in rows)]
+    if not present:
+        # choose up to 4 columns that look stringy
+        first = rows[0]
+        present = [k for k, v in first.items() if isinstance(v, (str, int, float))][:4]
+    thead = "".join(f"<th>{_h(c)}</th>" for c in present)
+    trs = []
+    for r in rows:
+        tds = "".join(f"<td>{_h(str(r.get(c, '')))}</td>" for c in present)
+        trs.append(f"<tr>{tds}</tr>")
+    return f"""
+<table border="1" cellspacing="0" cellpadding="6">
+  <thead><tr>{thead}</tr></thead>
+  <tbody>
+    {''.join(trs)}
+  </tbody>
+</table>
 """
 
 def main():
-    if len(sys.argv) <= 1:
-        print("ERROR: mk_report: missing run_dir", file=sys.stderr)
+    if len(sys.argv) != 2:
+        print("usage: mk_report.py RESULTS_DIR", file=sys.stderr)
         sys.exit(2)
 
-    requested = Path(sys.argv[1])
-    run_dir = resolve_run_dir(requested)
-    if not run_dir.exists():
-        print(f"ERROR: mk_report: run_dir does not exist: {requested}", file=sys.stderr)
-        sys.exit(2)
+    run_dir = Path(sys.argv[1])
+    run_dir.mkdir(parents=True, exist_ok=True)
+    out = run_dir / "index.html"
 
-    out_path = run_dir / "index.html"
+    # Inputs we try to use if present
+    run_json = _read_json(run_dir / "run.json")
+    rows = _read_rows_jsonl(run_dir / "rows.jsonl", limit=25)
+    summary_rows = _read_summary_csv(run_dir / "summary.csv")
 
-    mode, data = load_summary(run_dir)
+    # Pull friendly metadata if available
+    model = (run_json or {}).get("model") or (run_json or {}).get("config", {}).get("model") or ""
+    seed = (run_json or {}).get("seed")
+    trials = (run_json or {}).get("trials")
+    asr = ""
+    if summary_rows:
+        # look for common columns
+        r0 = summary_rows[0]
+        asr = r0.get("asr") or r0.get("pass_rate") or ""
 
-    run_json_path, rows_path = locate_inputs(run_dir)
+    # Build the page
+    badges = []
+    if model: badges.append(f"<span>model: <code>{_h(model)}</code></span>")
+    if seed is not None: badges.append(f"<span>seed: <code>{_h(str(seed))}</code></span>")
+    if trials is not None: badges.append(f"<span>trials: <code>{_h(str(trials))}</code></span>")
+    if asr: badges.append(f"<span>ASR: <code>{_h(str(asr))}</code></span>")
+    badges_html = " · ".join(badges) if badges else "<em>No run metadata found.</em>"
 
-    run_meta: dict = {}
-    model = seed = "unknown"
-    if run_json_path:
-        try:
-            run_meta = json.loads(run_json_path.read_text(encoding="utf-8"))
-            model = run_meta.get("model", run_meta.get("config", {}).get("model", "unknown"))
-            seed = run_meta.get("seed", run_meta.get("config", {}).get("seed", "unknown"))
-        except Exception:
-            run_meta = {}
+    trial_table = _mk_trial_table(rows)
 
-    rows_preview: list[dict] = []
-    if rows_path:
-        try:
-            with rows_path.open("r", encoding="utf-8") as fh:
-                for i, line in enumerate(fh):
-                    if i >= 5000:
-                        break
-                    try:
-                        rows_preview.append(json.loads(line))
-                    except Exception:
-                        continue
-        except Exception:
-            rows_preview = []
+    # Link out to artifacts if present
+    links = []
+    for name in ("summary.csv", "summary.svg", "run.json", "rows.jsonl"):
+        p = run_dir / name
+        if p.exists():
+            links.append(f'<li><a href="{_h(name)}">{_h(name)}</a></li>')
+    links_html = "<ul>" + "".join(links) + "</ul>" if links else "<p><em>No artifacts found.</em></p>"
 
-    if run_meta:
-        if mode != "json":
-            # Keep original structure for csv/none modes while surfacing metadata.
-            data = dict(data)
-            if mode == "csv":
-                data.setdefault("csv_rows", [])
-        _extract_from_run_json(data, run_meta)
-    else:
-        # Populate best-effort metadata even if run.json failed to parse.
-        if mode == "json":
-            data = dict(data)
-            data.setdefault("model", model)
-            data.setdefault("seed", seed)
-        elif mode == "csv":
-            data = dict(data)
-            rows = list(data.get("csv_rows", []))
-            if rows:
-                rows[0].setdefault("model", model)
-                rows[0].setdefault("seed", seed)
-            data["csv_rows"] = rows
+    html_doc = f"""<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>DoomArena-Lab Report — { _h(run_dir.name) }</title>
+  <style>
+    body {{ font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; line-height: 1.4; padding: 24px; }}
+    h1 {{ margin: 0 0 8px; }}
+    .badges span {{ background: #f3f4f6; border-radius: 6px; padding: 4px 8px; margin-right: 6px; display: inline-block; }}
+    table {{ width: 100%; border-collapse: collapse; margin-top: 8px; }}
+    th, td {{ text-align: left; vertical-align: top; }}
+    code {{ background: #f8fafc; padding: 0 4px; border-radius: 4px; }}
+  </style>
+</head>
+<body>
+  <h1>DoomArena-Lab Report</h1>
+  <p>Run: <code>{_h(run_dir.name)}</code></p>
+  <p class="badges">{badges_html}</p>
 
+  <h2>Trial I/O (first {len(rows)} rows)</h2>
+  {trial_table}
 
-    # Import template renderer safely
-    try:
-        from tools.report import html_report  # type: ignore
-    except Exception as e:
-        out_path.write_text(_degraded_html(run_dir, e), encoding="utf-8")
-        print(f"Wrote {out_path} (degraded: import error)")
-        return
-    render_html = html_report.render_html  # type: ignore[attr-defined]
-
-    if rows_path or rows_preview:
-        fallback_rows = rows_path
-
-        def _read_rows_jsonl_override(target_dir: Path, limit: int = 50):
-            if rows_preview:
-                cap = min(limit, len(rows_preview))
-                return rows_preview[:cap]
-
-            candidates: list[Path | None] = []
-            default = target_dir / "rows.jsonl"
-            if fallback_rows and fallback_rows != default:
-                candidates.append(fallback_rows)
-            candidates.append(default)
-
-            for candidate in candidates:
-                if not candidate or not candidate.exists():
-                    continue
-                out = []
-                try:
-                    with candidate.open(encoding="utf-8") as f:
-                        for i, line in enumerate(f):
-                            if i >= limit or i >= 5000:
-                                break
-                            try:
-                                obj = json.loads(line)
-                            except Exception:
-                                continue
-                            out.append(obj)
-                except Exception:
-                    continue
-                if out:
-                    return out
-            return []
-
-        html_report._read_rows_jsonl = _read_rows_jsonl_override  # type: ignore[attr-defined]
-
-    # Attempt full render; fall back to degraded on any error
-    degraded = False
-    try:
-        html = render_html(run_dir, data, mode=mode)
-    except Exception as e:
-        html = _degraded_html(run_dir, e)
-        degraded = True
-
-    out_path.write_text(html, encoding="utf-8")
-    if degraded:
-        print(f"Wrote {out_path} (degraded)")
-    else:
-        print(f"Wrote {out_path}")
+  <h2>Artifacts</h2>
+  {links_html}
+</body>
+</html>
+"""
+    out.write_text(html_doc, encoding="utf-8")
 
 if __name__ == "__main__":
     main()
