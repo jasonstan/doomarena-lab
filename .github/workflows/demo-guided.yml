@@ -139,8 +139,8 @@ jobs:
     env:
       PYTHONUTF8: "1"
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-      # Reuse the workflow-scoped flag so shell scripts see consistent 1/0 values.
-      DRY_RUN: ${{ env.DRY_RUN }}
+      # Derive 1/0 from the workflow input directly (don't reference env.* here)
+      DRY_RUN: ${{ inputs.dry_run == 'true' && '1' || '0' }}
       STREAM: '0'
       GROQ_MODEL: ${{ inputs.model }}
       RISK_TEXT: ${{ inputs.risk_text }}
