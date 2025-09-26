@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import argparse
 import json
+import os
 import sys
+from collections import OrderedDict, deque
 from pathlib import Path
-from typing import Any, Dict, Iterator, Optional, Tuple
+from string import Template
+from typing import Any, Dict, Iterator, Mapping, Optional, Tuple
 
 try:
-    from tools.report.html_utils import esc, preview_block
+    from tools.report.html_utils import esc
 except Exception:  # fallback for older runners
     import html
 
@@ -15,13 +19,10 @@ except Exception:  # fallback for older runners
             return ""
         return html.escape(str(s), quote=True)
 
-    def preview_block(full_text: str, max_len: int = 160) -> str:
-        text = full_text or ""
-        short = (text[:max_len] + "…") if len(text) > max_len else text
-        return (
-            f"<details><summary><code>{esc(short)}</code></summary>"
-            f"<pre style='white-space:pre-wrap'>{esc(text)}</pre></details>"
-        )
+try:
+    from tools.report_utils import expandable_block, safe_get, truncate_for_preview
+except ModuleNotFoundError:  # pragma: no cover - script invoked from tools/
+    from report_utils import expandable_block, safe_get, truncate_for_preview
 
 
 def _read_jsonl_lines(p: Path) -> Iterator[Dict[str, Any]]:
@@ -121,50 +122,250 @@ def _find_rows_file(run_dir: Path) -> Optional[Path]:
     return None
 
 
-def render_trial_io_table(run_dir: Path) -> str:
-    rows_path = _find_rows_file(run_dir)
-    if not rows_path:
-        return "<p><em>No per-trial rows found (rows.jsonl missing).</em></p>"
+DEFAULT_TRIAL_LIMIT = 20
 
-    lines = []
-    lines.append("<h2>Trial I/O (raw prompts &amp; responses)</h2>")
-    lines.append("<p>Previews are truncated; expand a row to see the full text.</p>")
-    lines.append(
-        "<table style='width:100%; border-collapse:collapse'>"
-        "<thead><tr>"
-        "<th style='text-align:left; border-bottom:1px solid #ddd;'>#</th>"
-        "<th style='text-align:left; border-bottom:1px solid #ddd;'>Attack prompt</th>"
-        "<th style='text-align:left; border-bottom:1px solid #ddd;'>Model response</th>"
-        "<th style='text-align:left; border-bottom:1px solid #ddd;'>Success</th>"
-        "<th style='text-align:left; border-bottom:1px solid #ddd;'>Gate</th>"
-        "</tr></thead><tbody>"
+
+def _load_trial_template() -> Template:
+    template_path = Path(__file__).resolve().parent / "templates" / "report.html.j2"
+    try:
+        text = template_path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        # Fallback template keeps the page valid even if the asset is missing.
+        text = (
+            "<section id=\"trial-io\">"
+            "<h2>Trial I/O</h2>"
+            "$banner\n"
+            "$table_html\n"
+            "</section>"
+        )
+    return Template(text)
+
+
+def _escape_for_template(value: str) -> str:
+    if not value:
+        return value
+    return value.replace("$", "$$")
+
+
+def _format_success(value: Any) -> str:
+    if value is True:
+        return "✅"
+    if value is False:
+        return "❌"
+    return "—"
+
+
+def _format_callable(value: Any) -> str:
+    if value is True:
+        return "true"
+    if value is False:
+        return "false"
+    return "—"
+
+
+def _format_gate(value: Any) -> str:
+    if isinstance(value, Mapping):
+        decision = safe_get(value, "decision", "") or safe_get(value, "status", "")
+        reason = safe_get(value, "reason", "")
+        if reason == "—":
+            reason = safe_get(value, "reason_code", "")
+        if reason == "—":
+            reason = safe_get(value, "rule_id", "")
+        pieces = [str(part) for part in (decision, reason) if part not in (None, "", "—")]
+        if pieces:
+            return " / ".join(pieces)
+    elif value not in (None, ""):
+        return str(value)
+    return "—"
+
+
+def _trial_key(row: Mapping[str, Any], fallback: int) -> Tuple[str, bool]:
+    candidates = (
+        "trial_id",
+        "trial",
+        "trial_index",
+        "case_index",
     )
+    for key in candidates:
+        value = row.get(key)
+        if value not in (None, ""):
+            return str(value), True
+    input_case = row.get("input_case")
+    if isinstance(input_case, Mapping):
+        for key in ("trial_id", "trial_index", "id", "prompt_id"):
+            value = input_case.get(key)
+            if value not in (None, ""):
+                return str(value), True
+    return f"row-{fallback}", False
 
-    idx = 0
-    for row in _read_jsonl_lines(rows_path):
-        idx += 1
-        prompt = _extract_prompt(row) or ""
-        response = _extract_response(row) or ""
-        success = row.get("success")
-        pre = row.get("pre_gate")
-        post = row.get("post_gate")
-        pre_str = str(pre) if pre not in (None, "") else "-"
-        post_str = str(post) if post not in (None, "") else "-"
-        gate = esc(f"{pre_str}/{post_str}")
-        success_str = "✅" if success is True else ("❌" if success is False else "–")
 
-        lines.append(
-            "<tr>"
-            f"<td style='vertical-align:top; padding:6px 8px'>{idx}</td>"
-            f"<td style='vertical-align:top; padding:6px 8px'>{preview_block(prompt)}</td>"
-            f"<td style='vertical-align:top; padding:6px 8px'>{preview_block(response)}</td>"
-            f"<td style='vertical-align:top; padding:6px 8px'>{success_str}</td>"
-            f"<td style='vertical-align:top; padding:6px 8px'><code>{gate}</code></td>"
-            "</tr>"
+def _stream_callable_trials(rows_path: Path, limit: int) -> Tuple[list[Mapping[str, Any]], int, int]:
+    buckets: "OrderedDict[str, deque[Mapping[str, Any]]]" = OrderedDict()
+    key_order: list[str] = []
+    selected: list[Mapping[str, Any]] = []
+    total_callable = 0
+    trial_keys_seen: set[str] = set()
+    cycle_index = 0
+
+    for idx, row in enumerate(_read_jsonl_lines(rows_path)):
+        trial_key, is_concrete = _trial_key(row, idx)
+        if is_concrete:
+            trial_keys_seen.add(trial_key)
+
+        if row.get("callable") is True:
+            total_callable += 1
+            if len(selected) >= limit:
+                continue
+
+            if trial_key not in buckets:
+                buckets[trial_key] = deque()
+                key_order.append(trial_key)
+
+            buckets[trial_key].append(row)
+            cycle_index = _round_robin_drain(buckets, key_order, selected, limit, cycle_index)
+
+            if len(selected) >= limit:
+                buckets.clear()
+                key_order.clear()
+
+    return selected, total_callable, len(trial_keys_seen)
+
+
+def _round_robin_drain(
+    buckets: "OrderedDict[str, deque[Mapping[str, Any]]]",
+    key_order: list[str],
+    selected: list[Mapping[str, Any]],
+    limit: int,
+    cycle_index: int,
+) -> int:
+    if not key_order:
+        return cycle_index
+
+    made_progress = True
+    total_keys = len(key_order)
+    while len(selected) < limit and made_progress:
+        made_progress = False
+        for _ in range(total_keys):
+            if not key_order:
+                return cycle_index
+            key = key_order[cycle_index % len(key_order)]
+            cycle_index += 1
+            queue = buckets.get(key)
+            if queue:
+                selected.append(queue.popleft())
+                made_progress = True
+                if len(selected) >= limit:
+                    break
+        if not made_progress:
+            break
+    return cycle_index
+
+
+def _resolve_trial_id(row: Mapping[str, Any], fallback_index: int) -> str:
+    for key in ("trial_id", "trial", "trial_index", "id"):
+        value = row.get(key)
+        if value not in (None, ""):
+            return str(value)
+    input_case = row.get("input_case")
+    if isinstance(input_case, Mapping):
+        for key in ("trial_id", "trial_index", "id"):
+            value = input_case.get(key)
+            if value not in (None, ""):
+                return str(value)
+    return str(fallback_index + 1)
+
+
+def _render_trial_rows(rows: list[Mapping[str, Any]]) -> Tuple[str, int]:
+    rendered_rows: list[str] = []
+    for idx, row in enumerate(rows):
+        trial_id = esc(_resolve_trial_id(row, idx))
+        callable_text = esc(_format_callable(row.get("callable")))
+        pre_gate = esc(_format_gate(row.get("pre_gate")))
+        post_gate = esc(_format_gate(row.get("post_gate")))
+        success = _format_success(row.get("success"))
+
+        prompt_full = _extract_prompt(row) or ""
+        response_full = _extract_response(row) or ""
+        prompt_preview = truncate_for_preview(prompt_full)
+        response_preview = truncate_for_preview(response_full)
+
+        prompt_html = expandable_block(
+            f"prompt-{idx}",
+            prompt_preview,
+            prompt_full,
+        )
+        response_html = expandable_block(
+            f"response-{idx}",
+            response_preview,
+            response_full,
         )
 
-    lines.append("</tbody></table>")
-    return "\n".join(lines)
+        rendered_rows.append(
+            "<tr>"
+            f"<td>{trial_id}</td>"
+            f"<td>{callable_text}</td>"
+            f"<td>{pre_gate}</td>"
+            f"<td>{post_gate}</td>"
+            f"<td>{success}</td>"
+            f"<td>{prompt_html}</td>"
+            f"<td>{response_html}</td>"
+            "</tr>"
+        )
+    return "\n".join(rendered_rows), len(rows)
+
+
+def render_trial_io_section(run_dir: Path, *, trial_limit: int) -> str:
+    template = _load_trial_template()
+    rows_path = _find_rows_file(run_dir)
+    rel_root = "."
+
+    if not rows_path:
+        return template.substitute(
+            banner=_escape_for_template(
+                "<p class=\"muted\">No per-trial rows found (rows.jsonl missing).</p>"
+            ),
+            table_html="",
+            rel_root=rel_root,
+            shown_n=0,
+            total_callable=0,
+            total_trials=0,
+        )
+
+    sampled_rows, total_callable, total_trials = _stream_callable_trials(rows_path, trial_limit)
+    rows_html, shown_n = _render_trial_rows(sampled_rows)
+    display_trials = total_trials or max(total_callable, shown_n, 0)
+
+    if total_callable == 0:
+        banner = "<p class=\"muted\">No callable trials—check pre/post gates or budgets.</p>"
+        table_html = ""
+    else:
+        banner = (
+            "<p class=\"muted\">showing "
+            f"{shown_n} of {total_callable} callable trials; round-robin across {display_trials} trials."  # noqa: E501
+            "</p>"
+        )
+        table_html = (
+            "<table class=\"io-table\">"
+            "<thead>"
+            "<tr>"
+            "<th>trial_id</th><th>callable</th><th>pre_gate</th>"
+            "<th>post_gate</th><th>success</th><th>prompt</th><th>response</th>"
+            "</tr>"
+            "</thead>"
+            "<tbody>"
+            f"{rows_html}"
+            "</tbody>"
+            "</table>"
+        )
+
+    return template.substitute(
+        banner=_escape_for_template(banner),
+        table_html=_escape_for_template(table_html),
+        rel_root=rel_root,
+        shown_n=shown_n,
+        total_callable=total_callable,
+        total_trials=display_trials,
+    )
 
 
 def _append_badges(run_dir: Path) -> str:
@@ -192,7 +393,7 @@ def _read_file_safe(p: Path) -> str:
         return ""
 
 
-def build_full_html(run_dir: Path) -> str:
+def build_full_html(run_dir: Path, trial_limit: int) -> str:
     summary_svg = run_dir / "summary.svg"
 
     parts = []
@@ -209,7 +410,7 @@ def build_full_html(run_dir: Path) -> str:
         parts.append("<h2>Pass/Fail overview</h2>")
         parts.append(_read_file_safe(summary_svg))
 
-    parts.append(render_trial_io_table(run_dir))
+    parts.append(render_trial_io_section(run_dir, trial_limit=trial_limit))
 
     parts.append("<h2>Artifacts</h2><ul>")
     for name in ("summary.csv", "summary.svg", "rows.jsonl", "run.json"):
@@ -221,12 +422,12 @@ def build_full_html(run_dir: Path) -> str:
     return "\n".join(parts)
 
 
-def main(run_dir_arg: str) -> int:
+def main(run_dir_arg: str, *, trial_limit: int) -> int:
     run_dir = Path(run_dir_arg).resolve()
     run_dir.mkdir(parents=True, exist_ok=True)
     index = run_dir / "index.html"
     try:
-        html = build_full_html(run_dir)
+        html = build_full_html(run_dir, trial_limit)
         index.write_text(html, encoding="utf-8")
         return 0
     except Exception as e:
@@ -235,10 +436,22 @@ def main(run_dir_arg: str) -> int:
 
 
 def _cli(argv: list[str]) -> int:
-    if len(argv) < 2:
-        print("usage: python tools/mk_report.py <RUN_DIR>", file=sys.stderr)
-        return 2
-    return main(argv[1])
+    parser = argparse.ArgumentParser(description="Render DoomArena reports")
+    env_limit = os.environ.get("TRIAL_TABLE_LIMIT")
+    try:
+        default_limit = int(env_limit) if env_limit is not None else DEFAULT_TRIAL_LIMIT
+    except ValueError:
+        default_limit = DEFAULT_TRIAL_LIMIT
+    parser.add_argument("run_dir", help="Run directory containing summary artifacts")
+    parser.add_argument(
+        "--trial-limit",
+        type=int,
+        default=default_limit,
+        help=f"Number of callable trials to sample for the I/O table (default: {default_limit})",
+    )
+    args = parser.parse_args(argv[1:])
+    limit = args.trial_limit if args.trial_limit > 0 else DEFAULT_TRIAL_LIMIT
+    return main(args.run_dir, trial_limit=limit)
 
 
 if __name__ == "__main__":
