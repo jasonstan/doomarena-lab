@@ -30,6 +30,7 @@ on:
 
 permissions:
   contents: read
+  actions: write
 
 # Map inputs to the env used later in the job steps
 env:
@@ -137,7 +138,7 @@ jobs:
     env:
       PYTHONUTF8: "1"
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-      DRY_RUN: ${{ inputs.dry_run && '1' || '0' }}
+      DRY_RUN: ${{ env.DRY_RUN }}
       STREAM: '0'
       GROQ_MODEL: ${{ inputs.model }}
       RISK_TEXT: ${{ inputs.risk_text }}
