@@ -14,6 +14,59 @@ CaseLike = Mapping[str, Any]
 EMPTY_SENTINEL = "[EMPTY]"
 
 
+def _debug_enabled() -> bool:
+    return os.getenv("DEBUG_TRIAL_IO", "0") == "1"
+
+
+_DEBUG_EMITTED_COUNT = 0
+
+
+def _log_debug_snapshot(
+    rows_file: Path,
+    *,
+    trial_id: Any,
+    attack_id: Any,
+    callable_flag: bool,
+    success_flag: Any,
+    input_preview: str,
+    output_preview: str,
+) -> None:
+    global _DEBUG_EMITTED_COUNT
+
+    if not _debug_enabled():
+        return
+
+    debug_file = rows_file.parent / "trial_io_debug.txt"
+    try:
+        with debug_file.open("a", encoding="utf-8") as handle:
+            handle.write(
+                "trial={trial} attack={attack} callable={callable} success={success}\n"
+                "INPUT: {input}\n"
+                "OUTPUT: {output}\n---\n".format(
+                    trial=trial_id,
+                    attack=attack_id,
+                    callable=bool(callable_flag),
+                    success=bool(success_flag) if success_flag is not None else False,
+                    input=input_preview,
+                    output=output_preview,
+                )
+            )
+    except OSError:
+        # Debug tracing should never block the main persistence path.
+        pass
+
+    if _DEBUG_EMITTED_COUNT < 3:
+        print(
+            "[trial_io.debug] trial={trial} attack={attack} input={input} output={output}".format(
+                trial=trial_id,
+                attack=attack_id,
+                input=input_preview,
+                output=output_preview,
+            )
+        )
+    _DEBUG_EMITTED_COUNT += 1
+
+
 def _stringify(value: Any) -> str:
     if value is None:
         return ""
@@ -219,6 +272,18 @@ def persist_attempt(
             "output_text": output_text_to_store,
             "latency_ms": latency_ms,
         }
+    )
+
+    preview_input = input_text_to_store[:200]
+    preview_output = output_text_to_store[:200]
+    _log_debug_snapshot(
+        rows_file,
+        trial_id=base_row.get("trial_id"),
+        attack_id=base_row.get("attack_id"),
+        callable_flag=base_row.get("callable"),
+        success_flag=base_row.get("success"),
+        input_preview=preview_input,
+        output_preview=preview_output,
     )
 
     with rows_file.open("a", encoding="utf-8") as handle:

@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -64,17 +65,35 @@ def test_trial_io_end_to_end(tmp_path):
                 "attack_id": f"a{attack_idx}",
                 "trial_id": f"{attack_idx}-{trial_idx}",
                 "attack_prompt": f"Attack {attack_idx} seed prompt",
-                "prompt": prompt,
                 "row": {
                     "callable": True,
                     "success": bool(trial_idx % 3 == 0),
+                    "input_case": {"prompt": prompt},
                 },
                 "model_args": {"attack": attack_idx, "trial": trial_idx},
             }
+            variant = (attack_idx + trial_idx) % 3
+            if variant == 0:
+                case["input_text"] = prompt
+            elif variant == 1:
+                case.setdefault("input_case", {})
+                case["input_case"] = {"prompt": prompt}
+            else:
+                case["prompt"] = prompt
+                case["row"]["response"] = {"text": f"legacy::{attack_idx}-{trial_idx}"}
             cases.append(case)
             success_flags.append(bool(trial_idx % 3 == 0))
 
-    run_real.run_attempts(cases, rows_path=rows_path, call_model=fake_call_model)
+    original_debug = os.environ.get("DEBUG_TRIAL_IO")
+    try:
+        os.environ["DEBUG_TRIAL_IO"] = "1"
+        run_real._DEBUG_EMITTED_COUNT = 0  # type: ignore[attr-defined]
+        run_real.run_attempts(cases, rows_path=rows_path, call_model=fake_call_model)
+    finally:
+        if original_debug is not None:
+            os.environ["DEBUG_TRIAL_IO"] = original_debug
+        else:
+            os.environ.pop("DEBUG_TRIAL_IO", None)
 
     assert len(prompts_seen) == 40
     lines = rows_path.read_text(encoding="utf-8").strip().splitlines()
@@ -104,3 +123,7 @@ def test_trial_io_end_to_end(tmp_path):
     assert "WARNING" not in section_html
     assert "<th>attack_id</th>" in section_html
     assert "<td>a0</td>" in section_html
+
+    debug_file = rows_path.parent / "trial_io_debug.txt"
+    assert debug_file.exists()
+    assert "trial=0-0" in debug_file.read_text(encoding="utf-8")

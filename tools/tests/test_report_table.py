@@ -82,3 +82,30 @@ def test_trial_table_lists_all_callable_attempts(tmp_path):
     assert "<th>attack_id</th>" in section_html
     assert "<td>a0</td>" in section_html
     assert "WARNING" not in section_html
+
+
+def test_warning_when_placeholders_dominate(tmp_path):
+    run_dir = tmp_path / "warn"
+    run_dir.mkdir()
+
+    rows_path = run_dir / "rows.jsonl"
+    placeholder_row = {
+        "callable": True,
+        "trial_id": "t0",
+        "attack_id": "a0",
+        "input_text": "[EMPTY]",
+        "output_text": "[EMPTY]",
+    }
+    literal_row = {
+        "callable": True,
+        "trial_id": "t1",
+        "attack_id": "a1",
+        "input_text": "Prompt literal",
+        "output_text": "Response literal",
+    }
+    rows_payload = [placeholder_row] * 9 + [literal_row]
+    rows_path.write_text("\n".join(json.dumps(r) for r in rows_payload) + "\n", encoding="utf-8")
+
+    section_html = mk_report.render_trial_io_section(run_dir, trial_limit=1000)
+
+    assert "WARNING" in section_html
