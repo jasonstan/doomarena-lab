@@ -8,7 +8,10 @@ import datetime as dt
 import json
 import os
 import pathlib
+import random
+import re
 import sys
+import time
 from typing import Any, Callable
 
 TOOLS_DIR = pathlib.Path(__file__).resolve().parent
@@ -87,6 +90,16 @@ def main() -> None:
         default=False,
         type=_parse_bool,
     )
+    parser.add_argument("--rpm", default=30, type=int)
+    parser.add_argument("--sleep-ms", dest="sleep_ms", default=0, type=int)
+    parser.add_argument("--max-retries", dest="max_retries", default=2, type=int)
+    parser.add_argument("--backoff-ms", dest="backoff_ms", default=750, type=int)
+    parser.add_argument(
+        "--respect-retry-after",
+        dest="respect_retry_after",
+        default=True,
+        type=_parse_bool,
+    )
     args = parser.parse_args()
 
     requested_provider = args.provider
@@ -141,6 +154,123 @@ def main() -> None:
         json.dump(run_meta, handle, ensure_ascii=False, indent=2)
         handle.write("\n")
 
+    rpm = max(0, int(args.rpm))
+    min_interval = 60.0 / rpm if rpm > 0 else 0.0
+    sleep_extra = max(0, int(args.sleep_ms)) / 1000.0
+    max_retries = max(0, int(args.max_retries))
+    backoff_base = max(0, int(args.backoff_ms)) / 1000.0
+    respect_retry_after = bool(args.respect_retry_after)
+
+    previous_call_ts: float | None = None
+
+    def _await_turn() -> None:
+        nonlocal previous_call_ts
+        if caller is None or min_interval <= 0 or previous_call_ts is None:
+            return
+        now = time.time()
+        next_earliest = max(now, previous_call_ts + min_interval)
+        delay = next_earliest - now
+        if delay > 0:
+            time.sleep(delay)
+
+    def _record_attempt_time() -> None:
+        nonlocal previous_call_ts
+        previous_call_ts = time.time()
+        if sleep_extra > 0:
+            time.sleep(sleep_extra)
+
+    def _classify_exception(exc: Exception) -> dict[str, Any]:
+        exc_text = str(exc) or exc.__class__.__name__
+        http_status: int | None = None
+        error_code: str | None = None
+        retry_after_seconds: float | None = None
+        error_kind = "network"
+        body_text = ""
+        json_body: dict[str, Any] | None = None
+
+        http_match = re.search(r"HTTP\s+(\d{3})", exc_text)
+        if http_match:
+            http_status = int(http_match.group(1))
+            error_kind = "http"
+            if http_status == 429:
+                error_kind = "rate_limit"
+            body_text = exc_text.split("\n", 1)[1].strip() if "\n" in exc_text else ""
+            try:
+                json_body = json.loads(body_text) if body_text else None
+            except json.JSONDecodeError:
+                json_body = None
+        elif "Network error" in exc_text:
+            error_kind = "network"
+        error_obj: dict[str, Any] | None = None
+        message_text = ""
+        if json_body:
+            if isinstance(json_body, dict):
+                if isinstance(json_body.get("error"), dict):
+                    error_obj = json_body["error"]
+                else:
+                    error_obj = None
+            if isinstance(error_obj, dict):
+                error_code = error_obj.get("code") or error_obj.get("type")
+                message_text = str(error_obj.get("message", ""))
+                retry_hint = error_obj.get("retry_after_ms")
+                if isinstance(retry_hint, (int, float)) and retry_hint > 0:
+                    retry_after_seconds = float(retry_hint) / 1000.0
+                retry_hint_seconds = error_obj.get("retry_after")
+                if (
+                    retry_after_seconds is None
+                    and isinstance(retry_hint_seconds, (int, float))
+                    and retry_hint_seconds > 0
+                ):
+                    retry_after_seconds = float(retry_hint_seconds)
+            if not message_text and isinstance(json_body, dict):
+                message_text = str(json_body.get("message", ""))
+            if retry_after_seconds is None and isinstance(json_body, dict):
+                retry_root_ms = json_body.get("retry_after_ms")
+                retry_root_s = json_body.get("retry_after")
+                if isinstance(retry_root_ms, (int, float)) and retry_root_ms > 0:
+                    retry_after_seconds = float(retry_root_ms) / 1000.0
+                elif (
+                    isinstance(retry_root_s, (int, float))
+                    and retry_root_s > 0
+                ):
+                    retry_after_seconds = float(retry_root_s)
+        if not message_text and body_text:
+            message_text = body_text
+        if not message_text:
+            message_text = exc_text
+
+        if retry_after_seconds is None and message_text:
+            match_retry = re.search(
+                r"Please try again in\s+(\d+(?:\.\d+)?)\s*(seconds?|ms|milliseconds?)",
+                message_text,
+                flags=re.IGNORECASE,
+            )
+            if match_retry:
+                amount = float(match_retry.group(1))
+                unit = match_retry.group(2).lower()
+                if unit.startswith("ms"):
+                    retry_after_seconds = amount / 1000.0
+                else:
+                    retry_after_seconds = amount
+
+        retryable = False
+        if http_status == 429 or (http_status is not None and http_status >= 500):
+            retryable = True
+
+        short_message = message_text[:500]
+        if len(message_text) > 500:
+            short_message = short_message.rstrip() + "…"
+
+        return {
+            "error_text": exc_text,
+            "short_message": short_message,
+            "error_kind": error_kind,
+            "http_status": http_status,
+            "error_code": error_code,
+            "retry_after_seconds": retry_after_seconds,
+            "retryable": retryable,
+        }
+
     with rows_path.open("w", encoding="utf-8") as handle:
         for case in cases:
             attack_id = case.get("attack_id")
@@ -153,30 +283,86 @@ def main() -> None:
                 row_errors: list[str] = []
                 if missing_key_code and args.allow_mock_fallback:
                     row_errors.append(missing_key_code)
-                if caller is None:
-                    output_text = missing_key_message or "[ERROR] Provider unavailable"
-                    if missing_key_code and not args.allow_mock_fallback:
-                        row_errors.append(missing_key_code)
-                else:
-                    try:
-                        output_text = caller(prompt, args.model, args.temperature)
-                    except Exception as exc:  # pragma: no cover - diagnostics path
-                        error_text = str(exc)
-                        truncated = error_text[:500]
-                        if len(error_text) > 500:
-                            truncated = truncated.rstrip() + "…"
-                        output_text = f"[ERROR] {truncated}" if truncated else "[ERROR]"
-                        row_errors.append(error_text)
+
                 row: dict[str, Any] = {
                     "trial_id": trial_id,
                     "attack_id": attack_id,
                     "persona": persona,
                     "input_text": prompt,
-                    "output_text": output_text if isinstance(output_text, str) else str(output_text),
                     "callable": caller is not None,
                 }
+
+                output_text: str
+                attempt_status = "ok"
+                count_in_asr = True
+                error_metadata: dict[str, Any] = {}
+
+                if caller is None:
+                    output_text = missing_key_message or "[ERROR] Provider unavailable"
+                    attempt_status = "error"
+                    count_in_asr = False
+                    if missing_key_code and not args.allow_mock_fallback:
+                        row_errors.append(missing_key_code)
+                else:
+                    attempt_index = 0
+                    last_error: dict[str, Any] | None = None
+                    while True:
+                        _await_turn()
+                        try:
+                            output_text = caller(prompt, args.model, args.temperature)
+                            attempt_status = "ok"
+                            count_in_asr = True
+                            last_error = None
+                            _record_attempt_time()
+                            break
+                        except Exception as exc:  # pragma: no cover - diagnostics path
+                            _record_attempt_time()
+                            classified = _classify_exception(exc)
+                            last_error = classified
+                            attempt_status = "error"
+                            count_in_asr = False
+                            if not classified.get("retryable") or attempt_index >= max_retries:
+                                break
+                            wait_time = 0.0
+                            retry_after = classified.get("retry_after_seconds")
+                            if respect_retry_after and isinstance(retry_after, (int, float)):
+                                wait_time = float(retry_after)
+                            elif backoff_base > 0:
+                                wait_time = backoff_base * (2 ** attempt_index)
+                            if wait_time > 0:
+                                wait_time += random.uniform(0, 0.25)
+                                time.sleep(wait_time)
+                            attempt_index += 1
+                            continue
+                    if last_error:
+                        error_metadata = last_error
+                        short_message = last_error.get("short_message", "")
+                        output_text = (
+                            f"[ERROR] {short_message}" if short_message else "[ERROR]"
+                        )
+                        row_errors.append(last_error.get("error_text", ""))
+
+                row["output_text"] = (
+                    output_text if isinstance(output_text, str) else str(output_text)
+                )
+                row["attempt_status"] = attempt_status
+                row["count_in_asr"] = bool(count_in_asr)
+
+                if attempt_status != "ok" and error_metadata:
+                    error_kind = error_metadata.get("error_kind")
+                    if error_kind:
+                        row["error_kind"] = error_kind
+                    if error_metadata.get("http_status") is not None:
+                        row["http_status"] = error_metadata["http_status"]
+                    if error_metadata.get("error_code"):
+                        row["error_code"] = error_metadata["error_code"]
+                    retry_after_seconds = error_metadata.get("retry_after_seconds")
+                    if isinstance(retry_after_seconds, (int, float)):
+                        row["retry_after_ms"] = int(retry_after_seconds * 1000)
+
                 if row_errors:
-                    row["error"] = " | ".join(row_errors)
+                    row["error"] = " | ".join(str(err) for err in row_errors if err)
+
                 handle.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
