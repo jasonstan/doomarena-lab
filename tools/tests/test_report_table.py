@@ -21,6 +21,7 @@ def _make_row(attack_idx: int, trial_idx: int) -> dict:
     row: dict[str, object] = {
         "callable": True,
         "trial_id": f"a{attack_idx}-t{trial_idx}",
+        "attack_id": f"a{attack_idx}",
         "pre_gate": {"decision": "allow", "reason": f"attack-{attack_idx}"},
         "post_gate": {"decision": "allow", "rule_id": f"rule-{trial_idx}"},
     }
@@ -78,3 +79,6 @@ def test_trial_table_lists_all_callable_attempts(tmp_path):
 
     assert "<th>input</th>" in section_html
     assert "<th>output</th>" in section_html
+    assert "<th>attack_id</th>" in section_html
+    assert "<td>a0</td>" in section_html
+    assert "WARNING" not in section_html
