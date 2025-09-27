@@ -30,9 +30,9 @@ except Exception:  # fallback for older runners
         return html.escape(str(s), quote=True)
 
 try:
-    from tools.report_utils import safe_get
+    from tools.report_utils import get_prompt, get_response, safe_get
 except ModuleNotFoundError:  # pragma: no cover - script invoked from tools/
-    from report_utils import safe_get  # type: ignore
+    from report_utils import get_prompt, get_response, safe_get  # type: ignore
 
 
 PROMPT_KEYS = [
@@ -288,7 +288,16 @@ def _normalize_for_expander(value: str) -> str:
 def _build_trial_row(row: Mapping[str, Any], index: int) -> Dict[str, str]:
     trial_id_raw = _resolve_trial_id(row, index)
     prompt_txt = pick(row, PROMPT_KEYS)
+    if prompt_txt == "—":
+        legacy_prompt = get_prompt(row)
+        if legacy_prompt:
+            prompt_txt = legacy_prompt
+
     response_txt = pick(row, RESPONSE_KEYS)
+    if response_txt == "—":
+        legacy_response = get_response(row)
+        if legacy_response:
+            response_txt = legacy_response
 
     prompt_html = expander(f"p-{trial_id_raw}", _normalize_for_expander(prompt_txt))
     response_html = expander(f"r-{trial_id_raw}", _normalize_for_expander(response_txt))
