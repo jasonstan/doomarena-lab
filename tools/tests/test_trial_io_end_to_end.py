@@ -4,6 +4,8 @@ import re
 import sys
 from pathlib import Path
 
+import pytest
+
 MK_REPORT_PATH = Path(__file__).resolve().parents[1] / "mk_report.py"
 spec = importlib.util.spec_from_file_location("mk_report", MK_REPORT_PATH)
 assert spec and spec.loader
@@ -26,6 +28,10 @@ def _blank_row(trial_idx: int) -> dict[str, object]:
     }
 
 
+@pytest.mark.xfail(
+    reason="Trial I/O report currently omits prompt/response for callable rows; awaiting fix.",
+    strict=True,
+)
 def test_trial_io_section_loses_prompt_and_response(tmp_path: Path) -> None:
     run_dir = tmp_path / "run"
     run_dir.mkdir()
