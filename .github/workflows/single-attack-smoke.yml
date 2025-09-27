@@ -1,0 +1,63 @@
+name: Single Attack Smoke (Log I/O)
+
+on:
+  workflow_dispatch:
+    inputs:
+      prompt:
+        description: "Attack prompt to send (exact string)"
+        type: string
+        required: true
+      provider:
+        description: "Provider alias used by runner (e.g., groq, openai, local)"
+        type: choice
+        options: [groq, openai, local]
+        default: groq
+      model:
+        description: "Model identifier (e.g., llama-3.1-8b-instant)"
+        type: string
+        default: llama-3.1-8b-instant
+      temperature:
+        description: "Sampling temperature"
+        type: number
+        default: 0.0
+
+jobs:
+  single-attack:
+    runs-on: ubuntu-latest
+    env:
+      PROVIDER: ${{ inputs.provider }}
+      MODEL_ID: ${{ inputs.model }}
+      TEMPERATURE: ${{ inputs.temperature }}
+      ATTACK_PROMPT: ${{ inputs.prompt }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      PYTHONUTF8: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install repo (if needed)
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      - name: Run single attack and print I/O
+        run: |
+          python tools/smoke_single_attack.py \
+            --provider "${PROVIDER}" \
+            --model "${MODEL_ID}" \
+            --temperature "${TEMPERATURE}" \
+            --prompt "${ATTACK_PROMPT}"
+
+      - name: Upload I/O log artifact (optional)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: single-attack-io
+          path: smoke_single_attack.log
+          if-no-files-found: ignore
