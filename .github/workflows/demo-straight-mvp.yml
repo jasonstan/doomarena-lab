@@ -47,7 +47,7 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Preflight: provider keys present?
+      - name: "Preflight: provider keys present?"
         id: preflight
         shell: bash
         run: |
@@ -60,7 +60,7 @@ jobs:
                 echo "::warning:: GROQ_API_KEY missing → switching provider=mock"
                 echo "provider=mock" >> $GITHUB_OUTPUT
               else
-                echo "::error:: GROQ_API_KEY is not set. Add it under Settings → Secrets and rerun (or set allow_mock_fallback=true)."
+                echo "::error:: GROQ_API_KEY is not set. Add it in Settings → Secrets, or set allow_mock_fallback=true."
                 exit 1
               fi
             else
@@ -73,7 +73,7 @@ jobs:
                 echo "::warning:: OPENAI_API_KEY missing → switching provider=mock"
                 echo "provider=mock" >> $GITHUB_OUTPUT
               else
-                echo "::error:: OPENAI_API_KEY is not set. Add it under Settings → Secrets and rerun (or set allow_mock_fallback=true)."
+                echo "::error:: OPENAI_API_KEY is not set. Add it in Settings → Secrets, or set allow_mock_fallback=true."
                 exit 1
               fi
             else
