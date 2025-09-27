@@ -59,34 +59,34 @@ jobs:
         with:
           python-version: "3.11"
 
-- name: "Parse tuning_json → env"
-  shell: bash
-  run: |
-    python - <<'PY'
-    import os, json
-    raw = os.environ.get("TUNING_JSON") or "{}"
-    try:
-        data = json.loads(raw)
-    except Exception:
-        data = {}
-    def put(name, value):
-        # Booleans must be "true"/"false" strings for subsequent CLI flags
-        if isinstance(value, bool):
-            value = "true" if value else "false"
-        with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as f:
-            f.write(f"{name}={value}\n")
-    defaults = {
-        "RPM": 30,
-        "SLEEP_MS": 0,
-        "MAX_RETRIES": 2,
-        "BACKOFF_MS": 750,
-        "RESPECT_RETRY_AFTER": True,
-        "MUTATE_TEMPERATURE": 0.7,
-        "COOLDOWN_AFTER_MUTATE_MS": 2000,
-    }
-    for k, v in defaults.items():
-        put(k, data.get(k.lower(), v))
-    PY
+      - name: "Parse tuning_json → env"
+        shell: bash
+        run: |
+          python - <<'PY'
+            import os, json
+            raw = os.environ.get("TUNING_JSON") or "{}"
+            try:
+                data = json.loads(raw)
+            except Exception:
+                data = {}
+            def put(name, value):
+                # Booleans must be "true"/"false" strings for subsequent CLI flags
+                if isinstance(value, bool):
+                    value = "true" if value else "false"
+                with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as f:
+                    f.write(f"{name}={value}\n")
+            defaults = {
+                "RPM": 30,
+                "SLEEP_MS": 0,
+                "MAX_RETRIES": 2,
+                "BACKOFF_MS": 750,
+                "RESPECT_RETRY_AFTER": True,
+                "MUTATE_TEMPERATURE": 0.7,
+                "COOLDOWN_AFTER_MUTATE_MS": 2000,
+            }
+            for k, v in defaults.items():
+                put(k, data.get(k.lower(), v))
+            PY
 
       - name: "Preflight: provider keys present?"
         id: preflight
