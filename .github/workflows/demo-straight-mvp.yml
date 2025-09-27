@@ -23,26 +23,16 @@ on:
         description: "If real key is missing, auto-switch to mock"
         type: boolean
         default: false
-      rpm:
-        description: "Requests per minute cap"
-        type: number
-        default: 30
-      sleep_ms:
-        description: "Extra sleep between attempts (ms)"
+      mutations:
+        description: "Paraphrases per attack (0 = none)"
         type: number
         default: 0
-      max_retries:
-        description: "Max retries on 429/5xx"
-        type: number
-        default: 2
-      backoff_ms:
-        description: "Base backoff (ms)"
-        type: number
-        default: 750
-      respect_retry_after:
-        description: "Honor provider retry-after hints"
-        type: boolean
-        default: true
+      tuning_json:
+        description: >-
+          Advanced knobs as JSON:
+          {"rpm":30,"sleep_ms":0,"max_retries":2,"backoff_ms":750,"respect_retry_after":true,"mutate_temperature":0.7,"cooldown_after_mutate_ms":2000}
+        type: string
+        default: '{"rpm":30,"sleep_ms":0,"max_retries":2,"backoff_ms":750,"respect_retry_after":true,"mutate_temperature":0.7,"cooldown_after_mutate_ms":2000}'
 
 jobs:
   mvp:
@@ -54,6 +44,8 @@ jobs:
       TEMPERATURE: ${{ inputs.temperature }}
       SEED: ${{ inputs.seed }}
       ALLOW_MOCK: ${{ inputs.allow_mock_fallback }}
+      MUTATIONS: ${{ inputs.mutations }}
+      TUNING_JSON: ${{ inputs.tuning_json }}
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       GROQ_API_BASE: https://api.groq.com/openai/v1
@@ -67,20 +59,46 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: "Parse tuning_json → env"
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os, json
+          raw = os.environ.get("TUNING_JSON") or "{}"
+          try:
+            d = json.loads(raw)
+          except Exception:
+            d = {}
+          def env(name, default):
+            v = d.get(name.lower(), default)
+            if isinstance(v, bool):
+              v = "true" if v else "false"
+            print(f"{name}={v}")
+          for k, default in [
+            ("RPM", 30),
+            ("SLEEP_MS", 0),
+            ("MAX_RETRIES", 2),
+            ("BACKOFF_MS", 750),
+            ("RESPECT_RETRY_AFTER", "true"),
+            ("MUTATE_TEMPERATURE", 0.7),
+            ("COOLDOWN_AFTER_MUTATE_MS", 2000),
+          ]:
+            env(k, default)
+          PY | tee -a $GITHUB_ENV
+
       - name: "Preflight: provider keys present?"
         id: preflight
         shell: bash
         run: |
           set -euo pipefail
           provider="${PROVIDER}"
-          allow="${ALLOW_MOCK}"
           if [[ "$provider" == "groq" ]]; then
             if [[ -z "${GROQ_API_KEY}" ]]; then
-              if [[ "$allow" == "true" ]]; then
+              if [[ "${ALLOW_MOCK}" == "true" ]]; then
                 echo "::warning:: GROQ_API_KEY missing → switching provider=mock"
                 echo "provider=mock" >> $GITHUB_OUTPUT
               else
-                echo "::error:: GROQ_API_KEY is not set. Add it in Settings → Secrets, or set allow_mock_fallback=true."
+                echo "::error:: GROQ_API_KEY is not set. Add it in Settings → Secrets or enable allow_mock_fallback."
                 exit 1
               fi
             else
@@ -89,11 +107,11 @@ jobs:
             fi
           elif [[ "$provider" == "openai" ]]; then
             if [[ -z "${OPENAI_API_KEY}" ]]; then
-              if [[ "$allow" == "true" ]]; then
+              if [[ "${ALLOW_MOCK}" == "true" ]]; then
                 echo "::warning:: OPENAI_API_KEY missing → switching provider=mock"
                 echo "provider=mock" >> $GITHUB_OUTPUT
               else
-                echo "::error:: OPENAI_API_KEY is not set. Add it in Settings → Secrets, or set allow_mock_fallback=true."
+                echo "::error:: OPENAI_API_KEY is not set. Add it in Settings → Secrets or enable allow_mock_fallback."
                 exit 1
               fi
             else
@@ -116,6 +134,36 @@ jobs:
             --seed "${SEED}" \
             --out cases_mvp.jsonl
 
+      - name: "Mutate prompts (rate-limited)"
+        if: ${{ env.MUTATIONS > 0 }}
+        env:
+          EFFECTIVE_PROVIDER: ${{ steps.preflight.outputs.provider }}
+        run: |
+          python tools/mvp_mutate.py \
+            --in cases_mvp.jsonl \
+            --out cases_mvp.jsonl \
+            --mutations "${MUTATIONS}" \
+            --provider "${EFFECTIVE_PROVIDER}" \
+            --model "${MODEL_ID}" \
+            --temperature "${MUTATE_TEMPERATURE}" \
+            --rpm "${RPM}" \
+            --sleep-ms "${SLEEP_MS}" \
+            --max-retries "${MAX_RETRIES}" \
+            --backoff-ms "${BACKOFF_MS}" \
+            --respect-retry-after "${RESPECT_RETRY_AFTER}" \
+            --groq-base "${GROQ_API_BASE}" \
+            --openai-base "${OPENAI_API_BASE}" \
+            --allow-mock-fallback "${ALLOW_MOCK}"
+
+      - name: "Cooldown after mutate"
+        if: ${{ env.MUTATIONS > 0 && env.COOLDOWN_AFTER_MUTATE_MS != '0' }}
+        run: |
+          python - <<'PY'
+          import os, time
+          ms = int(os.environ.get("COOLDOWN_AFTER_MUTATE_MS", "0"))
+          time.sleep(ms / 1000.0)
+          PY
+
       - name: Run attempts (straight-through)
         env:
           EFFECTIVE_PROVIDER: ${{ steps.preflight.outputs.provider }}
@@ -132,11 +180,11 @@ jobs:
             --groq-base "${GROQ_API_BASE}" \
             --openai-base "${OPENAI_API_BASE}" \
             --allow-mock-fallback "${ALLOW_MOCK}" \
-            --rpm "${{ inputs.rpm }}" \
-            --sleep-ms "${{ inputs.sleep_ms }}" \
-            --max-retries "${{ inputs.max_retries }}" \
-            --backoff-ms "${{ inputs.backoff_ms }}" \
-            --respect-retry-after "${{ inputs.respect_retry_after }}"
+            --rpm "${RPM}" \
+            --sleep-ms "${SLEEP_MS}" \
+            --max-retries "${MAX_RETRIES}" \
+            --backoff-ms "${BACKOFF_MS}" \
+            --respect-retry-after "${RESPECT_RETRY_AFTER}"
 
       - name: Verify results
         run: |
