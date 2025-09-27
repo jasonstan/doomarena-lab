@@ -8,9 +8,9 @@ on:
         type: string
         required: true
       provider:
-        description: "Provider alias used by runner (e.g., groq, openai, local)"
+        description: "Provider"
         type: choice
-        options: [groq, openai, local]
+        options: [groq, openai, mock]
         default: groq
       model:
         description: "Model identifier (e.g., llama-3.1-8b-instant)"
@@ -31,10 +31,27 @@ jobs:
       ATTACK_PROMPT: ${{ inputs.prompt }}
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      # explicit bases (override in env if needed)
+      GROQ_API_BASE: https://api.groq.com/openai/v1
+      OPENAI_API_BASE: https://api.openai.com/v1
       PYTHONUTF8: "1"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Choose provider (fallback to mock if key missing)
+        id: choose
+        run: |
+          provider="${PROVIDER}"
+          if [ "$provider" = "groq" ] && [ -z "${GROQ_API_KEY}" ]; then
+            echo "No GROQ_API_KEY; falling back to MOCK."
+            echo "provider=mock" >> $GITHUB_OUTPUT
+          elif [ "$provider" = "openai" ] && [ -z "${OPENAI_API_KEY}" ]; then
+            echo "No OPENAI_API_KEY; falling back to MOCK."
+            echo "provider=mock" >> $GITHUB_OUTPUT
+          else
+            echo "provider=$provider" >> $GITHUB_OUTPUT
+          fi
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -47,12 +64,17 @@ jobs:
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
       - name: Run single attack and print I/O
+        env:
+          PROVIDER: ${{ steps.choose.outputs.provider }}
         run: |
+          echo "Using provider: ${PROVIDER}"
           python tools/smoke_single_attack.py \
             --provider "${PROVIDER}" \
             --model "${MODEL_ID}" \
             --temperature "${TEMPERATURE}" \
-            --prompt "${ATTACK_PROMPT}"
+            --prompt "${ATTACK_PROMPT}" \
+            --groq-base "${GROQ_API_BASE}" \
+            --openai-base "${OPENAI_API_BASE}"
 
       - name: Upload I/O log artifact (optional)
         if: always()
@@ -60,4 +82,4 @@ jobs:
         with:
           name: single-attack-io
           path: smoke_single_attack.log
-          if-no-files-found: ignore
+          if-no-files-found: warn
