@@ -40,50 +40,50 @@ jobs:
       OPENAI_API_BASE: https://api.openai.com/v1
       PYTHONUTF8: "1"
 
-    steps:
-      - uses: actions/checkout@v4
+steps:
+  - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+  - uses: actions/setup-python@v5
+    with:
+      python-version: "3.11"
 
-      - name: Preflight: provider keys present?
-        id: preflight
-        shell: bash
-        run: |
-          set -euo pipefail
-          provider="${PROVIDER}"
-          allow="${ALLOW_MOCK}"
-          if [[ "$provider" == "groq" ]]; then
-            if [[ -z "${GROQ_API_KEY}" ]]; then
-              if [[ "$allow" == "true" ]]; then
-                echo "::warning:: GROQ_API_KEY missing → switching provider=mock"
-                echo "provider=mock" >> $GITHUB_OUTPUT
-              else
-                echo "::error:: GROQ_API_KEY is not set. Add it under Settings → Secrets and rerun (or set allow_mock_fallback=true)."
-                exit 1
-              fi
-            else
-              echo "::notice:: GROQ_API_KEY detected"
-              echo "provider=groq" >> $GITHUB_OUTPUT
-            fi
-          elif [[ "$provider" == "openai" ]]; then
-            if [[ -z "${OPENAI_API_KEY}" ]]; then
-              if [[ "$allow" == "true" ]]; then
-                echo "::warning:: OPENAI_API_KEY missing → switching provider=mock"
-                echo "provider=mock" >> $GITHUB_OUTPUT
-              else
-                echo "::error:: OPENAI_API_KEY is not set. Add it under Settings → Secrets and rerun (or set allow_mock_fallback=true)."
-                exit 1
-              fi
-            else
-              echo "::notice:: OPENAI_API_KEY detected"
-              echo "provider=openai" >> $GITHUB_OUTPUT
-            fi
-          else
+  - name: "Preflight: provider keys present?"
+    id: preflight
+    shell: bash
+    run: |
+      set -euo pipefail
+      provider="${PROVIDER}"
+      allow="${ALLOW_MOCK}"
+      if [[ "$provider" == "groq" ]]; then
+        if [[ -z "${GROQ_API_KEY}" ]]; then
+          if [[ "$allow" == "true" ]]; then
+            echo "::warning:: GROQ_API_KEY missing → switching provider=mock"
             echo "provider=mock" >> $GITHUB_OUTPUT
+          else
+            echo "::error:: GROQ_API_KEY is not set. Add it in Settings → Secrets, or set allow_mock_fallback=true."
+            exit 1
           fi
-
+        else
+          echo "::notice:: GROQ_API_KEY detected"
+          echo "provider=groq" >> $GITHUB_OUTPUT
+        fi
+      elif [[ "$provider" == "openai" ]]; then
+        if [[ -z "${OPENAI_API_KEY}" ]]; then
+          if [[ "$allow" == "true" ]]; then
+            echo "::warning:: OPENAI_API_KEY missing → switching provider=mock"
+            echo "provider=mock" >> $GITHUB_OUTPUT
+          else
+            echo "::error:: OPENAI_API_KEY is not set. Add it in Settings → Secrets, or set allow_mock_fallback=true."
+            exit 1
+          fi
+        else
+          echo "::notice:: OPENAI_API_KEY detected"
+          echo "provider=openai" >> $GITHUB_OUTPUT
+        fi
+      else
+        echo "provider=mock" >> $GITHUB_OUTPUT
+      fi
+      
       - name: Install repo (if any reqs)
         run: |
           python -m pip install --upgrade pip
