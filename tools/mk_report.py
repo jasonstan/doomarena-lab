@@ -5,6 +5,7 @@ import json
 import os
 import sys
 from collections import OrderedDict, deque
+from collections.abc import Iterable, Sequence
 from pathlib import Path
 from string import Template
 from typing import Any, Dict, Iterator, Mapping, Optional, Tuple
@@ -38,19 +39,59 @@ def _read_jsonl_lines(p: Path) -> Iterator[Dict[str, Any]]:
 
 
 def _join_user_messages(messages: Any) -> Optional[str]:
-    if not isinstance(messages, list):
+    if not isinstance(messages, Iterable) or isinstance(messages, (str, bytes, bytearray)):
         return None
     parts = []
-    for m in messages:
-        if isinstance(m, dict) and m.get("role") in ("user", "system"):
-            content = m.get("content")
-            if isinstance(content, str):
-                parts.append(content)
-            elif isinstance(content, list):
-                for b in content:
-                    if isinstance(b, dict) and b.get("type") == "text":
-                        parts.append(str(b.get("text", "")))
-    return "\n".join(p for p in parts if p) or None
+    for message in messages:
+        if not isinstance(message, Mapping):
+            continue
+        role = message.get("role")
+        if role and str(role).lower() not in {"user", "system"}:
+            continue
+        text = _stringify_text(message.get("content"))
+        if not text:
+            text = _stringify_text(message.get("text"))
+        if text.strip():
+            parts.append(text)
+    if parts:
+        return "\n\n".join(parts)
+    return None
+
+
+def _stringify_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, Mapping):
+        for key in ("text", "content", "message"):
+            if key in value:
+                return _stringify_text(value.get(key))
+        return json.dumps(value, ensure_ascii=False)
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        parts = []
+        for item in value:
+            if isinstance(item, Mapping) and item.get("type") == "text":
+                text = _stringify_text(item.get("text"))
+            else:
+                text = _stringify_text(item)
+            if text:
+                parts.append(text)
+        if parts:
+            return "\n".join(parts)
+        return ""
+    return str(value)
+
+
+def _dig(mapping: Mapping[str, Any], path: Sequence[str]) -> Any:
+    current: Any = mapping
+    for key in path:
+        if not isinstance(current, Mapping):
+            return None
+        current = current.get(key)
+    return current
 
 
 def _openai_like(raw: Any) -> Optional[str]:
@@ -64,26 +105,66 @@ def _openai_like(raw: Any) -> Optional[str]:
 
 
 def _extract_prompt(row: Dict[str, Any]) -> Optional[str]:
-    for key in ("input_text", "input", "attack_prompt", "prompt"):
-        val = row.get(key)
-        if isinstance(val, str) and val.strip():
-            return val
-    prom = _join_user_messages(row.get("messages"))
-    if prom:
-        return prom
-    ic = row.get("input_case")
-    if isinstance(ic, dict):
-        v = ic.get("attack_prompt")
-        if isinstance(v, str) and v.strip():
-            return v
+    candidate_paths = (
+        ("input_text",),
+        ("input", "input_text"),
+        ("input", "attack_prompt"),
+        ("input", "prompt"),
+        ("input_case", "attack_prompt"),
+        ("input_case", "prompt"),
+        ("request", "input", "attack_prompt"),
+        ("request", "input", "prompt"),
+        ("request", "attack_prompt"),
+        ("request", "prompt"),
+        ("attack_prompt",),
+        ("prompt",),
+        ("input",),
+    )
+    for path in candidate_paths:
+        value = _dig(row, path)
+        text = _stringify_text(value)
+        if text.strip():
+            return text
+
+    for path in (
+        ("messages",),
+        ("input", "messages"),
+        ("input_case", "messages"),
+        ("request", "messages"),
+        ("request", "input", "messages"),
+    ):
+        text = _join_user_messages(_dig(row, path))
+        if text:
+            return text
+
     return None
 
 
 def _extract_response(row: Dict[str, Any]) -> Optional[str]:
-    for key in ("output_text", "output", "response", "model_output"):
-        val = row.get(key)
-        if isinstance(val, str) and val.strip():
-            return val
+    candidate_paths = (
+        ("output_text",),
+        ("output", "text"),
+        ("output", "content"),
+        ("output", "message", "content"),
+        ("output", "choices"),
+        ("response", "text"),
+        ("response", "output_text"),
+        ("response", "content"),
+        ("response", "message", "content"),
+        ("response", "choices"),
+        ("completion", "text"),
+        ("completion", "choices"),
+        ("completion",),
+        ("output",),
+        ("response",),
+        ("model_output",),
+    )
+    for path in candidate_paths:
+        value = _dig(row, path)
+        text = _stringify_text(value)
+        if text.strip():
+            return text
+
     raw = row.get("raw_output")
     txt = _openai_like(raw)
     if isinstance(txt, str) and txt.strip():
@@ -422,8 +503,40 @@ def build_full_html(run_dir: Path, trial_limit: int) -> str:
     return "\n".join(parts)
 
 
+def resolve_run_dir(requested: Path) -> Path:
+    path = requested.expanduser()
+    try:
+        resolved = path.resolve()
+    except Exception:
+        resolved = path
+
+    if resolved.exists():
+        return resolved
+
+    pointer = path.parent / f"{path.name}.path"
+    if pointer.exists():
+        try:
+            target_text = pointer.read_text(encoding="utf-8").strip()
+        except Exception:
+            target_text = ""
+        if target_text:
+            target = Path(target_text)
+            if not target.is_absolute():
+                target = (pointer.parent / target_text)
+            try:
+                target_resolved = target.resolve()
+            except Exception:
+                target_resolved = target
+            if target_resolved.exists():
+                return target_resolved
+            return target_resolved
+
+    return resolved
+
+
 def main(run_dir_arg: str, *, trial_limit: int) -> int:
-    run_dir = Path(run_dir_arg).resolve()
+    requested = Path(run_dir_arg)
+    run_dir = resolve_run_dir(requested)
     run_dir.mkdir(parents=True, exist_ok=True)
     index = run_dir / "index.html"
     try:
