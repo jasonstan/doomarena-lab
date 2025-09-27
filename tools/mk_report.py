@@ -30,45 +30,23 @@ except Exception:  # fallback for older runners
         return html.escape(str(s), quote=True)
 
 try:
-    from tools.report_utils import get_prompt, get_response
+    from tools.report_utils import (
+        EMPTY_SENTINEL,
+        ResolvedField,
+        get_prompt,
+        get_response,
+        resolve_prompt_field,
+        resolve_response_field,
+    )
 except ModuleNotFoundError:  # pragma: no cover - script invoked from tools/
-    from report_utils import get_prompt, get_response  # type: ignore
-
-
-PROMPT_KEYS = [
-    ("input_text", None),
-    ("input_case", "prompt"),
-    ("input", "prompt"),
-    ("attack_prompt", None),
-    ("prompt", None),
-]
-
-
-RESPONSE_KEYS = [
-    ("output_text", None),
-    ("model_response", None),
-    ("response", "text"),
-    ("response", None),
-    ("output", None),
-    ("model_output", None),
-]
-
-
-EMPTY_SENTINEL = "[EMPTY]"
-
-
-def pick(row: Mapping[str, Any], keys: list[tuple[str, Optional[str]]]) -> str:
-    for outer, inner in keys:
-        value = row.get(outer)
-        if inner is None:
-            if value:
-                return str(value)
-            continue
-        if isinstance(value, Mapping):
-            candidate = value.get(inner)
-            if candidate:
-                return str(candidate)
-    return "—"
+    from report_utils import (  # type: ignore
+        EMPTY_SENTINEL,
+        ResolvedField,
+        get_prompt,
+        get_response,
+        resolve_prompt_field,
+        resolve_response_field,
+    )
 
 
 def expander(block_id: str, text: Optional[str], limit: int = 240) -> str:
@@ -272,33 +250,40 @@ def _resolve_attack_id(row: Mapping[str, Any]) -> str:
     return "—"
 
 
+PLACEHOLDER_VALUES = {"", "—", EMPTY_SENTINEL}
+
+
 def _normalize_for_expander(value: Optional[str]) -> str:
     if value is None:
         return ""
     return value
 
 
-def _is_preview_empty(value: Optional[str]) -> bool:
+def _is_placeholder_text(value: Optional[str]) -> bool:
     if value is None:
         return True
     stripped = value.strip()
-    return stripped == "" or stripped == "—" or stripped == EMPTY_SENTINEL
+    return stripped in PLACEHOLDER_VALUES
 
 
 def _build_trial_row(row: Mapping[str, Any], index: int) -> Dict[str, str]:
     trial_id_raw = _resolve_trial_id(row, index)
     attack_id_raw = _resolve_attack_id(row)
-    prompt_txt = pick(row, PROMPT_KEYS)
+    prompt_res = resolve_prompt_field(row)
+    prompt_txt = prompt_res.text
     if prompt_txt == "—":
         legacy_prompt = get_prompt(row)
         if legacy_prompt:
             prompt_txt = legacy_prompt
+            prompt_res = ResolvedField(text=legacy_prompt, source="legacy.get_prompt")
 
-    response_txt = pick(row, RESPONSE_KEYS)
+    response_res = resolve_response_field(row)
+    response_txt = response_res.text
     if response_txt == "—":
         legacy_response = get_response(row)
         if legacy_response:
             response_txt = legacy_response
+            response_res = ResolvedField(text=legacy_response, source="legacy.get_response")
 
     prompt_html = expander(f"p-{trial_id_raw}", _normalize_for_expander(prompt_txt))
     response_html = expander(f"r-{trial_id_raw}", _normalize_for_expander(response_txt))
@@ -315,6 +300,8 @@ def _build_trial_row(row: Mapping[str, Any], index: int) -> Dict[str, str]:
         "response_html": response_html,
         "prompt_raw": prompt_txt,
         "response_raw": response_txt,
+        "prompt_source": prompt_res.source,
+        "response_source": response_res.source,
     }
 
 
@@ -323,8 +310,9 @@ def _collect_trial_rows(
 ) -> Tuple[list[Dict[str, str]], int, Dict[str, int]]:
     table_rows: list[Dict[str, str]] = []
     total_callable = 0
-    missing_inputs = 0
-    missing_outputs = 0
+    placeholder_inputs = 0
+    placeholder_outputs = 0
+    placeholder_rows = 0
 
     for idx, row in enumerate(_read_jsonl_lines(rows_path)):
         if row.get("callable") is True:
@@ -332,13 +320,25 @@ def _collect_trial_rows(
             if len(table_rows) >= max_rows:
                 continue
             built = _build_trial_row(row, idx)
-            if _is_preview_empty(built.get("prompt_raw")):
-                missing_inputs += 1
-            if _is_preview_empty(built.get("response_raw")):
-                missing_outputs += 1
+            prompt_is_placeholder = _is_placeholder_text(built.get("prompt_raw"))
+            response_is_placeholder = _is_placeholder_text(built.get("response_raw"))
+            if prompt_is_placeholder:
+                placeholder_inputs += 1
+            if response_is_placeholder:
+                placeholder_outputs += 1
+            if prompt_is_placeholder or response_is_placeholder:
+                placeholder_rows += 1
             table_rows.append(built)
 
-    return table_rows, total_callable, {"inputs": missing_inputs, "outputs": missing_outputs}
+    return (
+        table_rows,
+        total_callable,
+        {
+            "inputs": placeholder_inputs,
+            "outputs": placeholder_outputs,
+            "rows": placeholder_rows,
+        },
+    )
 
 
 def _render_trial_table_rows(rows: list[Dict[str, str]]) -> str:
@@ -393,7 +393,7 @@ def render_trial_io_section(run_dir: Path, *, trial_limit: int) -> str:
         total_callable = 0
         trials_display = "—"
     else:
-        table_rows, total_callable, missing_counts = _collect_trial_rows(rows_path, cap)
+        table_rows, total_callable, placeholder_counts = _collect_trial_rows(rows_path, cap)
         shown_n = len(table_rows)
         rendered_rows = [
             {
@@ -408,7 +408,6 @@ def render_trial_io_section(run_dir: Path, *, trial_limit: int) -> str:
         rows_html = _render_trial_table_rows(rendered_rows)
         trials_display = str(total_trials) if total_trials != "—" else "—"
 
-        total_previews = shown_n * 2
         if total_callable == 0:
             status_line = "No callable trials—check pre/post gates or budgets."
             if not rows_html:
@@ -424,12 +423,11 @@ def render_trial_io_section(run_dir: Path, *, trial_limit: int) -> str:
                     "No callable trials available within the current trial limit."
                     "</td></tr>"
                 )
-            if total_previews:
-                missing_previews = missing_counts["inputs"] + missing_counts["outputs"]
-                missing_ratio = missing_previews / total_previews
-                if missing_ratio >= 0.5:
+            if shown_n:
+                placeholder_ratio = placeholder_counts["rows"] / shown_n
+                if placeholder_ratio >= 0.8:
                     warning_banner = (
-                        "<div class=\"warning\">⚠️ WARNING: Most callable trial inputs/outputs appear empty. "
+                        "<div class=\"warning\">⚠️ WARNING: Most callable trial inputs/outputs appear empty or placeholder-only. "
                         "Ensure literal prompt/response persistence is configured.</div>"
                     )
 

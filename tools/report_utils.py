@@ -1,44 +1,48 @@
 """Utility helpers for building HTML report content."""
 from __future__ import annotations
 
+from dataclasses import dataclass
 from html import escape
 from collections.abc import Iterable, Mapping, Sequence
-from typing import Any
+from typing import Any, Iterable as IterableType, Sequence as SequenceType
 
 
-KEY_CANDIDATES_PROMPT = [
+EMPTY_SENTINEL = "[EMPTY]"
+
+
+PROMPT_KEY_CANDIDATES: list[tuple[str, ...]] = [
+    ("input_text",),
     ("input_case", "prompt"),
     ("input", "prompt"),
     ("input", "attack_prompt"),
-    ("attack_prompt", None),
-    ("prompt", None),
+    ("attack_prompt",),
+    ("prompt",),
     ("request", "prompt"),
     ("request", "attack_prompt"),
     ("request", "input", "prompt"),
     ("request", "input", "attack_prompt"),
-    ("request", None),
-    ("input_text", None),
     ("request", "input_text"),
-    ("raw_input", None),
+    ("input",),
+    ("raw_input",),
 ]
 
 
-KEY_CANDIDATES_RESPONSE = [
-    ("model_response", None),
+RESPONSE_KEY_CANDIDATES: list[tuple[str, ...]] = [
+    ("output_text",),
+    ("model_response",),
     ("response", "text"),
     ("response", "output_text"),
     ("response", "content"),
     ("response", "choices"),
-    ("response", None),
+    ("response",),
     ("completion", "text"),
     ("completion", "choices"),
-    ("completion", None),
+    ("completion",),
     ("output", "text"),
     ("output", "content"),
-    ("output", None),
-    ("output_text", None),
-    ("model_output", None),
-    ("raw_output", None),
+    ("output",),
+    ("model_output",),
+    ("raw_output",),
 ]
 
 
@@ -99,62 +103,101 @@ def _stringify(value: Any) -> str:
     return str(value)
 
 
-def pick_field(row: Mapping[str, Any], candidates: Iterable[Sequence[str | None]]) -> str:
+@dataclass
+class ResolvedField:
+    text: str
+    source: str
+
+
+def _resolve_from_candidates(
+    row: Mapping[str, Any],
+    candidates: IterableType[SequenceType[str]],
+) -> ResolvedField | None:
     for path in candidates:
         if not path:
             continue
         current: Any = row
+        valid = True
         for key in path:
-            if key is None:
-                continue
             if not isinstance(current, Mapping):
-                current = None
+                valid = False
                 break
             current = current.get(key)
-        if current is None:
+        if not valid or current is None:
             continue
         text = _stringify(current)
-        if text and text.strip():
-            return text
-    return ""
+        if text:
+            return ResolvedField(text=text, source=".".join(path))
+        if text == "":
+            # keep searching – fallbacks may yield a literal string
+            continue
+    return None
+
+
+def _resolve_from_messages(
+    row: Mapping[str, Any],
+    paths: IterableType[SequenceType[str]],
+    *,
+    roles: set[str],
+) -> ResolvedField | None:
+    for path in paths:
+        value = _dig(row, path)
+        text = _join_messages(value, roles=roles)
+        if text:
+            path_label = ".".join(path) if path else "messages"
+            return ResolvedField(text=text, source=f"{path_label}[*]")
+    return None
+
+
+def _resolve_from_fallbacks(
+    row: Mapping[str, Any],
+    keys: IterableType[str],
+) -> ResolvedField | None:
+    for key in keys:
+        text = _stringify(row.get(key))
+        if text:
+            return ResolvedField(text=text, source=key)
+    return None
+
+
+def resolve_prompt_field(row: Mapping[str, Any]) -> ResolvedField:
+    direct = _resolve_from_candidates(row, PROMPT_KEY_CANDIDATES)
+    if direct:
+        return direct
+
+    message_based = _resolve_from_messages(row, PROMPT_MESSAGE_PATHS, roles={"user"})
+    if message_based:
+        return message_based
+
+    fallback = _resolve_from_fallbacks(row, PROMPT_FALLBACK_KEYS)
+    if fallback:
+        return fallback
+
+    return ResolvedField(text="—", source="∅")
+
+
+def resolve_response_field(row: Mapping[str, Any]) -> ResolvedField:
+    direct = _resolve_from_candidates(row, RESPONSE_KEY_CANDIDATES)
+    if direct:
+        return direct
+
+    message_based = _resolve_from_messages(row, RESPONSE_MESSAGE_PATHS, roles={"assistant"})
+    if message_based:
+        return message_based
+
+    fallback = _resolve_from_fallbacks(row, RESPONSE_FALLBACK_KEYS)
+    if fallback:
+        return fallback
+
+    return ResolvedField(text="—", source="∅")
 
 
 def get_prompt(row: Mapping[str, Any]) -> str:
-    text = pick_field(row, KEY_CANDIDATES_PROMPT)
-    if text:
-        return text
-
-    for path in PROMPT_MESSAGE_PATHS:
-        value = _dig(row, path)
-        text = _join_messages(value, roles={"user"})
-        if text:
-            return text
-
-    for key in PROMPT_FALLBACK_KEYS:
-        text = _stringify(row.get(key))
-        if text and text.strip():
-            return text
-
-    return ""
+    return resolve_prompt_field(row).text
 
 
 def get_response(row: Mapping[str, Any]) -> str:
-    text = pick_field(row, KEY_CANDIDATES_RESPONSE)
-    if text:
-        return text
-
-    for path in RESPONSE_MESSAGE_PATHS:
-        value = _dig(row, path)
-        text = _join_messages(value, roles={"assistant"})
-        if text:
-            return text
-
-    for key in RESPONSE_FALLBACK_KEYS:
-        text = _stringify(row.get(key))
-        if text and text.strip():
-            return text
-
-    return ""
+    return resolve_response_field(row).text
 
 
 def truncate_for_preview(text: str, limit: int = 240) -> str:
