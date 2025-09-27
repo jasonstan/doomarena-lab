@@ -2,25 +2,73 @@
 from __future__ import annotations
 
 from html import escape
-from typing import Any, Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
+from typing import Any
 
 
 KEY_CANDIDATES_PROMPT = [
     ("input_case", "prompt"),
     ("input", "prompt"),
+    ("input", "attack_prompt"),
     ("attack_prompt", None),
     ("prompt", None),
+    ("request", "prompt"),
+    ("request", "attack_prompt"),
+    ("request", "input", "prompt"),
+    ("request", "input", "attack_prompt"),
     ("request", None),
+    ("input_text", None),
+    ("request", "input_text"),
+    ("raw_input", None),
 ]
 
 
 KEY_CANDIDATES_RESPONSE = [
     ("model_response", None),
     ("response", "text"),
+    ("response", "output_text"),
+    ("response", "content"),
+    ("response", "choices"),
     ("response", None),
+    ("completion", "text"),
+    ("completion", "choices"),
+    ("completion", None),
+    ("output", "text"),
+    ("output", "content"),
     ("output", None),
+    ("output_text", None),
     ("model_output", None),
+    ("raw_output", None),
 ]
+
+
+PROMPT_MESSAGE_PATHS = [
+    ("messages",),
+    ("input", "messages"),
+    ("request", "messages"),
+    ("request", "input", "messages"),
+]
+
+
+RESPONSE_MESSAGE_PATHS = [
+    ("response", "messages"),
+    ("output", "messages"),
+    ("completion", "messages"),
+]
+
+
+PROMPT_FALLBACK_KEYS = ("input", "input_text")
+
+
+RESPONSE_FALLBACK_KEYS = (
+    "raw_output",
+    "output_text",
+    "output",
+    "response",
+    "completion",
+    "model_output",
+    "model_response",
+)
 
 
 def _stringify(value: Any) -> str:
@@ -72,11 +120,41 @@ def pick_field(row: Mapping[str, Any], candidates: Iterable[Sequence[str | None]
 
 
 def get_prompt(row: Mapping[str, Any]) -> str:
-    return pick_field(row, KEY_CANDIDATES_PROMPT)
+    text = pick_field(row, KEY_CANDIDATES_PROMPT)
+    if text:
+        return text
+
+    for path in PROMPT_MESSAGE_PATHS:
+        value = _dig(row, path)
+        text = _join_messages(value, roles={"user"})
+        if text:
+            return text
+
+    for key in PROMPT_FALLBACK_KEYS:
+        text = _stringify(row.get(key))
+        if text and text.strip():
+            return text
+
+    return ""
 
 
 def get_response(row: Mapping[str, Any]) -> str:
-    return pick_field(row, KEY_CANDIDATES_RESPONSE)
+    text = pick_field(row, KEY_CANDIDATES_RESPONSE)
+    if text:
+        return text
+
+    for path in RESPONSE_MESSAGE_PATHS:
+        value = _dig(row, path)
+        text = _join_messages(value, roles={"assistant"})
+        if text:
+            return text
+
+    for key in RESPONSE_FALLBACK_KEYS:
+        text = _stringify(row.get(key))
+        if text and text.strip():
+            return text
+
+    return ""
 
 
 def truncate_for_preview(text: str, limit: int = 240) -> str:
@@ -118,3 +196,48 @@ def safe_get(mapping: Mapping[str, Any] | None, key: str, default: str = "—") 
     if value in (None, ""):
         return default
     return str(value)
+
+
+def _dig(mapping: Mapping[str, Any], path: Sequence[str]) -> Any:
+    current: Any = mapping
+    for key in path:
+        if not isinstance(current, Mapping):
+            return None
+        current = current.get(key)
+    return current
+
+
+def _join_messages(value: Any, roles: set[str] | None = None) -> str:
+    if isinstance(value, Mapping):
+        # Some schemas wrap the messages in an object with its own keys.
+        if "messages" in value:
+            value = value.get("messages")
+
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
+        return ""
+
+    parts: list[str] = []
+    for message in value:
+        if not isinstance(message, Mapping):
+            text = _stringify(message)
+            if text and text.strip():
+                parts.append(text)
+            continue
+
+        role = message.get("role")
+        if roles and role and str(role).lower() not in roles:
+            continue
+
+        text = _stringify(message.get("content"))
+        if not text:
+            text = _stringify(message.get("text"))
+        if not text:
+            text = _stringify(message.get("message"))
+        if not text:
+            text = _stringify(message.get("value"))
+        if not text:
+            text = _stringify(message)
+        if text and text.strip():
+            parts.append(text)
+
+    return "\n\n".join(parts)
