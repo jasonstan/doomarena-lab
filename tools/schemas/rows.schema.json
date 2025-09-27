@@ -45,6 +45,18 @@
     "model_response": {
       "type": ["string", "null"],
       "description": "Literal text returned from the model or callable after execution."
+    },
+    "attack_prompt": {
+      "type": ["string", "null"],
+      "description": "Original attack prompt text associated with the attempt."
+    },
+    "input_text": {
+      "type": ["string", "null"],
+      "description": "Exact literal prompt string sent to the model after templating."
+    },
+    "output_text": {
+      "type": ["string", "null"],
+      "description": "Exact literal text returned from the model without post-processing."
     }
   },
   "additionalProperties": true
