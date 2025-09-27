@@ -11,6 +11,9 @@ from typing import Any, Callable, Iterable, Mapping
 CaseLike = Mapping[str, Any]
 
 
+EMPTY_SENTINEL = "[EMPTY]"
+
+
 def _stringify(value: Any) -> str:
     if value is None:
         return ""
@@ -30,6 +33,14 @@ def _stringify(value: Any) -> str:
     if isinstance(value, Iterable) and not isinstance(value, (str, bytes, bytearray)):
         parts = [_stringify(item) for item in value]
         return "\n".join(part for part in parts if part)
+    return str(value)
+
+
+def _ensure_string(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    if value is None:
+        return ""
     return str(value)
 
 
@@ -143,9 +154,9 @@ def persist_attempt(
     rows_path: os.PathLike[str] | str,
     call_model: Callable[..., Any],
     model_args: Mapping[str, Any] | None = None,
-    prompt_builder: Callable[[CaseLike], str] = build_final_prompt,
-    response_parser: Callable[[Any], str] = extract_text,
-    evaluator: Callable[[CaseLike, str, str, Any], Mapping[str, Any]] | None = None,
+    prompt_builder: Callable[[CaseLike], Any] = build_final_prompt,
+    response_parser: Callable[[Any], Any] = extract_text,
+    evaluator: Callable[[CaseLike, Any, Any, Any], Mapping[str, Any]] | None = None,
     row_overrides: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Execute a single REAL attempt and persist the resulting row."""
@@ -161,7 +172,8 @@ def persist_attempt(
     if not attack_prompt:
         attack_prompt = case.get("prompt")
 
-    input_text = prompt_builder(case) or ""
+    prompt_payload = prompt_builder(case)
+    input_text_literal = _ensure_string(prompt_payload)
 
     per_attempt_model_args = None
     candidate_args = case.get("model_args")
@@ -170,15 +182,18 @@ def persist_attempt(
     args = _combine_model_args(model_args, per_attempt_model_args)
 
     start = time.time()
-    response = call_model(input_text, **args)
+    response = call_model(prompt_payload, **args)
     latency_ms = int((time.time() - start) * 1000)
 
-    output_text = response_parser(response) or ""
+    parsed_output = response_parser(response)
+    output_text_literal = _ensure_string(parsed_output)
 
     eval_result: Mapping[str, Any] | None = None
     if evaluator is not None:
         try:
-            eval_result = evaluator(case, input_text, output_text, response) or {}
+            eval_result = (
+                evaluator(case, prompt_payload, parsed_output, response) or {}
+            )
         except Exception:
             eval_result = {}
 
@@ -191,12 +206,17 @@ def persist_attempt(
         success_value = base_row.get("success")
     base_row["success"] = bool(success_value) if success_value is not None else False
 
+    input_text_to_store = input_text_literal if input_text_literal != "" else EMPTY_SENTINEL
+    output_text_to_store = (
+        output_text_literal if output_text_literal != "" else EMPTY_SENTINEL
+    )
+
     base_row.update(
         {
             "attack_id": case.get("attack_id", "—"),
             "attack_prompt": attack_prompt or "—",
-            "input_text": input_text,
-            "output_text": output_text,
+            "input_text": input_text_to_store,
+            "output_text": output_text_to_store,
             "latency_ms": latency_ms,
         }
     )
