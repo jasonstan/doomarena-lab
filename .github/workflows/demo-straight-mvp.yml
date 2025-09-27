@@ -4,34 +4,42 @@ on:
   workflow_dispatch:
     inputs:
       provider:
-        description: "Provider to call"
-        required: true
-        default: "mock"
         type: choice
-        options:
-          - groq
-          - openai
-          - mock
+        options: [groq, openai, mock]
+        default: groq
       model:
-        description: "Model identifier"
-        required: true
-        default: "llama-3.1-8b-instant"
+        type: string
+        default: llama-3.1-8b-instant
       trials:
-        description: "Trials per case"
-        required: false
-        default: "10"
+        type: number
+        default: 10
       temperature:
-        description: "Sampling temperature"
-        required: false
-        default: "0.0"
+        type: number
+        default: 0.0
       seed:
-        description: "Deterministic translation seed"
-        required: false
-        default: "42"
+        type: number
+        default: 42
+      allow_mock_fallback:
+        description: "If real key is missing, auto-switch to mock"
+        type: boolean
+        default: false
 
 jobs:
-  run-demo:
+  mvp:
     runs-on: ubuntu-latest
+    env:
+      PROVIDER: ${{ inputs.provider }}
+      MODEL_ID: ${{ inputs.model }}
+      TRIALS: ${{ inputs.trials }}
+      TEMPERATURE: ${{ inputs.temperature }}
+      SEED: ${{ inputs.seed }}
+      ALLOW_MOCK: ${{ inputs.allow_mock_fallback }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      GROQ_API_BASE: https://api.groq.com/openai/v1
+      OPENAI_API_BASE: https://api.openai.com/v1
+      PYTHONUTF8: "1"
+
     steps:
       - uses: actions/checkout@v4
 
@@ -39,44 +47,88 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
+      - name: Preflight: provider keys present?
+        id: preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          provider="${PROVIDER}"
+          allow="${ALLOW_MOCK}"
+          if [[ "$provider" == "groq" ]]; then
+            if [[ -z "${GROQ_API_KEY}" ]]; then
+              if [[ "$allow" == "true" ]]; then
+                echo "::warning:: GROQ_API_KEY missing → switching provider=mock"
+                echo "provider=mock" >> $GITHUB_OUTPUT
+              else
+                echo "::error:: GROQ_API_KEY is not set. Add it under Settings → Secrets and rerun (or set allow_mock_fallback=true)."
+                exit 1
+              fi
+            else
+              echo "::notice:: GROQ_API_KEY detected"
+              echo "provider=groq" >> $GITHUB_OUTPUT
+            fi
+          elif [[ "$provider" == "openai" ]]; then
+            if [[ -z "${OPENAI_API_KEY}" ]]; then
+              if [[ "$allow" == "true" ]]; then
+                echo "::warning:: OPENAI_API_KEY missing → switching provider=mock"
+                echo "provider=mock" >> $GITHUB_OUTPUT
+              else
+                echo "::error:: OPENAI_API_KEY is not set. Add it under Settings → Secrets and rerun (or set allow_mock_fallback=true)."
+                exit 1
+              fi
+            else
+              echo "::notice:: OPENAI_API_KEY detected"
+              echo "provider=openai" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "provider=mock" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Install repo (if any reqs)
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-      - name: Set RUN_ID
+      - name: Translate NL threats → cases
         run: |
-          RUN_ID="$(date -u +%Y%m%d-%H%M%S)"
-          echo "RUN_ID=$RUN_ID" >> "$GITHUB_ENV"
-          echo "RUN_ID=$RUN_ID"
+          python tools/mvp_translate.py \
+            --spec specs/mvp_threats.yaml \
+            --seed "${SEED}" \
+            --out cases_mvp.jsonl
 
-      - name: Translate threats
-        run: |
-          python tools/mvp_translate.py --spec specs/mvp_threats.yaml --seed "${{ inputs.seed }}" --out cases_mvp.jsonl
-
-      - name: Execute trials
+      - name: Run attempts (straight-through)
         env:
-          RUN_ID: ${{ env.RUN_ID }}
+          EFFECTIVE_PROVIDER: ${{ steps.preflight.outputs.provider }}
         run: |
-          python tools/mvp_run.py --cases cases_mvp.jsonl --provider "${{ inputs.provider }}" --model "${{ inputs.model }}" --temperature "${{ inputs.temperature }}" --trials "${{ inputs.trials }}" --run-dir "results/${RUN_ID}"
+          RUN_ID="$(date +%Y%m%d-%H%M%S)"
+          echo "RUN_ID=$RUN_ID" >> $GITHUB_ENV
+          python tools/mvp_run.py \
+            --cases cases_mvp.jsonl \
+            --provider "${EFFECTIVE_PROVIDER}" \
+            --model "${MODEL_ID}" \
+            --temperature "${TEMPERATURE}" \
+            --trials "${TRIALS}" \
+            --run-dir "results/${RUN_ID}" \
+            --groq-base "${GROQ_API_BASE}" \
+            --openai-base "${OPENAI_API_BASE}" \
+            --allow-mock-fallback "${ALLOW_MOCK}"
 
-      - name: Verify outputs
-        env:
-          RUN_ID: ${{ env.RUN_ID }}
+      - name: Verify results
         run: |
-          python tools/mvp_verify.py --rows "results/${RUN_ID}/rows.jsonl" --spec specs/mvp_threats.yaml --out "results/${RUN_ID}/summary.csv"
+          python tools/mvp_verify.py \
+            --rows "results/${RUN_ID}/rows.jsonl" \
+            --spec specs/mvp_threats.yaml \
+            --out "results/${RUN_ID}/summary.csv"
 
       - name: Build minimal report
-        env:
-          RUN_ID: ${{ env.RUN_ID }}
         run: |
-          python tools/mvp_report_min.py --rows "results/${RUN_ID}/rows.jsonl" --summary "results/${RUN_ID}/summary.csv" --out "results/${RUN_ID}/index.html"
+          python tools/mvp_report_min.py \
+            --rows "results/${RUN_ID}/rows.jsonl" \
+            --summary "results/${RUN_ID}/summary.csv" \
+            --out "results/${RUN_ID}/index.html"
 
       - name: Upload artifacts
-        if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
-          name: demo-mvp-${{ env.RUN_ID }}
-          path: results/${{ env.RUN_ID }}/
-          if-no-files-found: error
-          retention-days: 7
+          name: results-${{ env.RUN_ID }}
+          path: results/${{ env.RUN_ID }}
