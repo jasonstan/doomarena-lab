@@ -1,0 +1,174 @@
+# Trial I/O: Root-Cause Diagnosis
+
+**Symptom (from user run):**
+- Trial I/O table shows ~3 rows with “Expand” buttons but **no input/output text**.
+- ASR shows ~0%, but raw I/O not visible to audit.
+- Expected: A attacks × T trials = **A×T** rows, each with literal input/output and success flag.
+
+---
+
+## 1) Runner → rows.jsonl (write path)
+
+**Files inspected**
+- `tools/run_real.py` lines `36–82` — prompt composition:
+```py
+36  def build_final_prompt(case: CaseLike) -> str:
+37      """Return the literal prompt string sent to the model for ``case``."""
+38      for key in ("input_text", "raw_input"):
+39          value = case.get(key)
+40          if value:
+41              return _stringify(value)
+42      input_case = case.get("input_case")
+43      if isinstance(input_case, Mapping):
+44          for key in ("prompt", "attack_prompt", "input_text"):
+45              value = input_case.get(key)
+46              if value:
+47                  return _stringify(value)
+48      for key in ("prompt", "attack_prompt", "request"):
+49          value = case.get(key)
+50          if value:
+51              return _stringify(value)
+```
+`tools/run_real.py` lines `172–207` — model call + extraction:
+```py
+172      start = time.time()
+173      response = call_model(input_text, **args)
+174      latency_ms = int((time.time() - start) * 1000)
+176      output_text = response_parser(response) or ""
+178      eval_result: Mapping[str, Any] | None = None
+179      if evaluator is not None:
+180          try:
+181              eval_result = evaluator(case, input_text, output_text, response) or {}
+```
+`tools/run_real.py` lines `194–207` — row serialization:
+```py
+194      base_row.update(
+195          {
+196              "attack_id": case.get("attack_id", "—"),
+197              "attack_prompt": attack_prompt or "—",
+198              "input_text": input_text,
+199              "output_text": output_text,
+200              "latency_ms": latency_ms,
+201          }
+202      )
+204      with rows_file.open("a", encoding="utf-8") as handle:
+205          handle.write(json.dumps(base_row, ensure_ascii=False) + "\n")
+206          handle.flush()
+207          os.fsync(handle.fileno())
+```
+Finding:
+
+Prompt field written: `input_text` (blank when `prompt_builder` returns "")
+
+Response field written: `output_text` (blank when `response_parser` finds nothing)
+
+Flushing per attempt: yes
+
+Example rows.jsonl (first 3 callable):
+```json
+{"trial_id": "trial-0", "attack_id": "attack-0", "callable": true, "attack_prompt": "—", "model_response": "—", "pre_gate": {"decision": "allow", "reason": "seed-0"}, "post_gate": {"decision": "allow", "reason": "seed-0"}}
+{"trial_id": "trial-1", "attack_id": "attack-1", "callable": true, "attack_prompt": "—", "model_response": "—", "pre_gate": {"decision": "allow", "reason": "seed-1"}, "post_gate": {"decision": "allow", "reason": "seed-1"}}
+{"trial_id": "trial-2", "attack_id": "attack-2", "callable": true, "attack_prompt": "—", "model_response": "—", "pre_gate": {"decision": "allow", "reason": "seed-2"}, "post_gate": {"decision": "allow", "reason": "seed-2"}}
+```
+2) Attempt cardinality
+Expectation: A×T callable attempts → A×T rows.
+Observed: callable:true rows counted = 3 (from rows.jsonl).
+Mismatch cause (if any): none in reproduction; filter keeps only `callable: true` rows.
+
+3) Report builder (`tools/mk_report.py`)
+Code path selecting prompt/response:
+```py
+38  PROMPT_KEYS = [
+39      ("input_text", None),
+40      ("input_case", "prompt"),
+41      ("input", "prompt"),
+42      ("attack_prompt", None),
+43      ("prompt", None),
+44  ]
+288  def _build_trial_row(row: Mapping[str, Any], index: int) -> Dict[str, str]:
+290      prompt_txt = pick(row, PROMPT_KEYS)
+291      if prompt_txt == "—":
+292          legacy_prompt = get_prompt(row)
+293          if legacy_prompt:
+294              prompt_txt = legacy_prompt
+296      response_txt = pick(row, RESPONSE_KEYS)
+297      if response_txt == "—":
+298          legacy_response = get_response(row)
+```
+Finding:
+
+Looks for keys: `input_text`, `input_case.prompt`, `input.prompt`, `attack_prompt`, `prompt`; similarly `output_text`, `model_response`, `response.text`, `response`, `output`, `model_output`.
+
+Our rows contain: only placeholders `attack_prompt: "—"` and `model_response: "—"`.
+
+Mismatch? yes → placeholders survive pick() and `_normalize_for_expander` then erase them, producing empty expanders.
+
+4) Template (`tools/templates/report.html.j2`)
+```html
+  <table class="io-table">
+    <thead>
+      <tr>
+        <th>trial_id</th><th>callable</th><th>pre_gate</th><th>post_gate</th><th>success</th><th>input</th><th>output</th>
+      </tr>
+    </thead>
+    <tbody>
+      <!-- TODO: prompt_html/response_html are empty when rows only contain placeholder values (see DIAGNOSIS). -->
+      $table_rows
+    </tbody>
+  </table>
+```
+Finding:
+
+Uses | safe on HTML blocks: n/a (string.Template injects raw HTML generated by `expander`).
+
+Full text present in DOM after click: no — placeholder `"—"` becomes empty string before rendering.
+
+JS toggler wired to correct IDs: yes.
+
+5) Workflow / path consistency
+Report input path: `_find_rows_file` resolves `<run>/rows.jsonl`
+Runner output path: `persist_attempt` writes to the same `<run>/rows.jsonl`
+Finding: same → file located correctly; content lacks literal I/O.
+
+6) Root Cause(s)
+RC1: Runner keeps placeholder `"—"` for prompt/response when upstream case data omits literal fields; `_normalize_for_expander` converts that to empty HTML, so Expand reveals nothing.
+
+RC2 (optional): Report builder relies on `PROMPT_KEYS`/`RESPONSE_KEYS` that never reach beyond placeholder values, so fallback never recovers missing text.
+
+RC3 (optional): —
+
+Severity: blocks auditability
+Blast radius: all reports derived from rows without `input_text`/`output_text`
+
+7) Repro & Failing Test
+Test added: tools/tests/test_trial_io_end_to_end.py
+Status on main: FAILS with message:
+```css
+Expected non-empty prompt/response in report table for callable attempts; got empty for 6/6.
+```
+8) Fix Plan (surgical)
+Persist literal I/O in runner rows as:
+
+input_text: exact prompt string sent (post-templating)
+
+output_text: exact raw model text
+
+Report builder: prefer input_text/output_text, fall back to:
+
+prompt: input_case.prompt, attack_prompt, prompt
+
+response: model_response, response.text, output
+
+Template: keep expanders; ensure | safe and correct IDs.
+
+Cardinality: ensure per-attempt iteration (not per attack).
+
+Validation: emit a WARNING in report header if total_callable > 0 and table previews are empty.
+
+Estimated diff size: ~40 lines across 4 files.
+Risk: low/medium; backwards compatible.
+Rollout: fix → PR; validate on synthetic + real run; then close.
+
+```sql
+
+```

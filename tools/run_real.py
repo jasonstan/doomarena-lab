@@ -162,6 +162,8 @@ def persist_attempt(
         attack_prompt = case.get("prompt")
 
     input_text = prompt_builder(case) or ""
+    # TODO: prompt_builder returns "" for cases that only expose system/user templates;
+    # ensure the literal combined prompt is persisted for report replay.
 
     per_attempt_model_args = None
     candidate_args = case.get("model_args")
@@ -174,6 +176,7 @@ def persist_attempt(
     latency_ms = int((time.time() - start) * 1000)
 
     output_text = response_parser(response) or ""
+    # TODO: confirm response_parser captures the raw assistant text used in reports.
 
     eval_result: Mapping[str, Any] | None = None
     if evaluator is not None:

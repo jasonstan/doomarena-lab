@@ -289,12 +289,14 @@ def _build_trial_row(row: Mapping[str, Any], index: int) -> Dict[str, str]:
     trial_id_raw = _resolve_trial_id(row, index)
     prompt_txt = pick(row, PROMPT_KEYS)
     if prompt_txt == "—":
+        # TODO: handle rows where only legacy keys like request.payload/messages carry the prompt.
         legacy_prompt = get_prompt(row)
         if legacy_prompt:
             prompt_txt = legacy_prompt
 
     response_txt = pick(row, RESPONSE_KEYS)
     if response_txt == "—":
+        # TODO: add explicit fallbacks for structured responses (e.g. response.payload.choices).
         legacy_response = get_response(row)
         if legacy_response:
             response_txt = legacy_response
