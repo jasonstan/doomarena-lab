@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import sys
+from html import escape
 from pathlib import Path
 from string import Template
 from typing import Any, Dict, Iterator, Mapping, Optional, Tuple
@@ -29,14 +30,57 @@ except Exception:  # fallback for older runners
         return html.escape(str(s), quote=True)
 
 try:
-    from tools.report_utils import (
-        expandable_block,
-        get_prompt,
-        get_response,
-        safe_get,
-    )
+    from tools.report_utils import get_prompt, get_response, safe_get
 except ModuleNotFoundError:  # pragma: no cover - script invoked from tools/
-    from report_utils import expandable_block, get_prompt, get_response, safe_get
+    from report_utils import get_prompt, get_response, safe_get  # type: ignore
+
+
+PROMPT_KEYS = [
+    ("input_text", None),
+    ("input_case", "prompt"),
+    ("input", "prompt"),
+    ("attack_prompt", None),
+    ("prompt", None),
+]
+
+
+RESPONSE_KEYS = [
+    ("output_text", None),
+    ("model_response", None),
+    ("response", "text"),
+    ("response", None),
+    ("output", None),
+    ("model_output", None),
+]
+
+
+def pick(row: Mapping[str, Any], keys: list[tuple[str, Optional[str]]]) -> str:
+    for outer, inner in keys:
+        value = row.get(outer)
+        if inner is None:
+            if value:
+                return str(value)
+            continue
+        if isinstance(value, Mapping):
+            candidate = value.get(inner)
+            if candidate:
+                return str(candidate)
+    return "—"
+
+
+def expander(block_id: str, text: str, limit: int = 240) -> str:
+    full_text = text or ""
+    preview = full_text[:limit] + ("…" if len(full_text) > limit else "")
+    safe_id = escape(block_id, quote=True)
+    preview_html = escape(preview, quote=False)
+    full_html = escape(full_text, quote=False)
+    return (
+        '<div class="expander">'
+        f'<div class="preview">{preview_html}</div>'
+        f'<div id="{safe_id}" class="fulltext" style="display:none;">{full_html}</div>'
+        f'<button class="toggle" data-expands="{safe_id}">Expand</button>'
+        "</div>"
+    )
 
 
 def _read_jsonl_lines(p: Path) -> Iterator[Dict[str, Any]]:
@@ -164,8 +208,14 @@ def _load_trial_template() -> Template:
         text = (
             "<section id=\"trial-io\">"
             "<h2>Trial I/O</h2>"
-            "$banner\n"
-            "$table_html\n"
+            "<p class=\"muted\">$status_line</p>"
+            "<table class=\"io-table\">"
+            "<thead><tr><th>trial_id</th><th>callable</th><th>pre_gate</th>"
+            "<th>post_gate</th><th>success</th><th>input</th><th>output</th></tr></thead>"
+            "<tbody>$table_rows</tbody>"
+            "</table>"
+            "<p class=\"muted\">Raw artifacts: <a href=\"$rel_root/rows.jsonl\">rows.jsonl</a> · "
+            "<a href=\"$rel_root/summary.csv\">summary.csv</a></p>"
             "</section>"
         )
     return Template(text)
@@ -178,6 +228,12 @@ def _escape_for_template(value: str) -> str:
 
 
 def _format_success(value: Any) -> str:
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes"}:
+            return "✅"
+        if normalized in {"false", "0", "no"}:
+            return "❌"
     if value is True:
         return "✅"
     if value is False:
@@ -223,16 +279,31 @@ def _resolve_trial_id(row: Mapping[str, Any], fallback_index: int) -> str:
     return str(fallback_index)
 
 
+def _normalize_for_expander(value: str) -> str:
+    if value is None or value == "—":
+        return ""
+    return value
+
+
 def _build_trial_row(row: Mapping[str, Any], index: int) -> Dict[str, str]:
     trial_id_raw = _resolve_trial_id(row, index)
-    prompt_txt = get_prompt(row) or ""
-    response_txt = get_response(row) or ""
+    prompt_txt = pick(row, PROMPT_KEYS)
+    if prompt_txt == "—":
+        legacy_prompt = get_prompt(row)
+        if legacy_prompt:
+            prompt_txt = legacy_prompt
 
-    prompt_html = expandable_block(f"p-{trial_id_raw}", prompt_txt)
-    response_html = expandable_block(f"r-{trial_id_raw}", response_txt)
+    response_txt = pick(row, RESPONSE_KEYS)
+    if response_txt == "—":
+        legacy_response = get_response(row)
+        if legacy_response:
+            response_txt = legacy_response
+
+    prompt_html = expander(f"p-{trial_id_raw}", _normalize_for_expander(prompt_txt))
+    response_html = expander(f"r-{trial_id_raw}", _normalize_for_expander(response_txt))
 
     success_value = row.get("success")
-    if success_value in (None, ""):
+    if success_value in (None, "", "—"):
         success_value = row.get("judge_success")
 
     return {
@@ -292,18 +363,6 @@ def render_trial_io_section(run_dir: Path, *, trial_limit: int) -> str:
     rows_path = _find_rows_file(run_dir)
     rel_root = "."
 
-    if not rows_path:
-        return template.substitute(
-            banner=_escape_for_template(
-                "<p class=\"muted\">No per-trial rows found (rows.jsonl missing).</p>"
-            ),
-            table_html="",
-            rel_root=rel_root,
-            shown_n=0,
-            total_callable=0,
-            total_trials=0,
-        )
-
     run_meta = _load_run_meta(run_dir)
     total_trials_meta: Any = run_meta.get("trials")
     if total_trials_meta is None:
@@ -316,48 +375,39 @@ def render_trial_io_section(run_dir: Path, *, trial_limit: int) -> str:
     cap = trial_limit if trial_limit > 0 else MAX_TABLE_ROWS
     cap = min(cap, MAX_TABLE_ROWS)
 
-    table_rows, total_callable = _collect_trial_rows(rows_path, cap)
-    shown_n = len(table_rows)
-    rows_html = _render_trial_table_rows(table_rows)
-
-    if total_trials == "—":
+    if not rows_path:
+        status_line = "No per-trial rows found (rows.jsonl missing)."
+        rows_html = '<tr><td colspan="7" class="muted">No rows recorded.</td></tr>'
+        table_rows: list[Dict[str, str]] = []
+        shown_n = 0
+        total_callable = 0
         trials_display = "—"
     else:
-        trials_display = str(total_trials)
+        table_rows, total_callable = _collect_trial_rows(rows_path, cap)
+        shown_n = len(table_rows)
+        rows_html = _render_trial_table_rows(table_rows)
+        trials_display = str(total_trials) if total_trials != "—" else "—"
 
-    if total_callable == 0:
-        banner = "<p class=\"muted\">No callable trials—check pre/post gates or budgets.</p>"
-        table_html = ""
-    else:
-        banner = (
-            "<p class=\"muted\">showing "
-            f"{shown_n} of {total_callable} callable trials; round-robin across {trials_display} trials."  # noqa: E501
-            "</p>"
-        )
-        table_html = (
-            "<table class=\"io-table\">"
-            "<thead>"
-            "<tr>"
-            "<th>trial_id</th><th>callable</th><th>pre_gate</th>"
-            "<th>post_gate</th><th>success</th><th>prompt</th><th>response</th>"
-            "</tr>"
-            "</thead>"
-            "<tbody>"
-            f"{rows_html}"
-            "</tbody>"
-            "</table>"
-        )
+        if total_callable == 0:
+            status_line = "No callable trials—check pre/post gates or budgets."
+            if not rows_html:
+                rows_html = '<tr><td colspan="7" class="muted">No callable trials recorded.</td></tr>'
+        else:
+            status_line = (
+                "showing "
+                f"{shown_n} of {total_callable} callable trials; round-robin across {trials_display} trials"
+            )
 
     context = {
-        "trial_table": table_rows,
+        "trial_table": table_rows if rows_path else [],
         "shown_n": shown_n,
         "total_callable": total_callable,
         "total_trials": trials_display,
     }
 
     return template.substitute(
-        banner=_escape_for_template(banner),
-        table_html=_escape_for_template(table_html),
+        status_line=_escape_for_template(status_line),
+        table_rows=_escape_for_template(rows_html),
         rel_root=rel_root,
         shown_n=shown_n,
         total_callable=total_callable,

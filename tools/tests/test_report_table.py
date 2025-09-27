@@ -72,6 +72,9 @@ def test_trial_table_lists_all_callable_attempts(tmp_path):
     assert "Attack 0 Trial 0" in section_html
     assert "Response 0-0" in section_html
 
-    full_blocks = re.findall(r'<div class="fulltext" id="[^"]+">(.*?)</div>', section_html, re.DOTALL)
+    full_blocks = re.findall(r'<div[^>]*class="fulltext"[^>]*>(.*?)</div>', section_html, re.DOTALL)
     assert len(full_blocks) >= 80
     assert all(block.strip() for block in full_blocks)
+
+    assert "<th>input</th>" in section_html
+    assert "<th>output</th>" in section_html
