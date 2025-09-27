@@ -1,0 +1,82 @@
+name: demo-straight-mvp
+
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: "Provider to call"
+        required: true
+        default: "mock"
+        type: choice
+        options:
+          - groq
+          - openai
+          - mock
+      model:
+        description: "Model identifier"
+        required: true
+        default: "llama-3.1-8b-instant"
+      trials:
+        description: "Trials per case"
+        required: false
+        default: "10"
+      temperature:
+        description: "Sampling temperature"
+        required: false
+        default: "0.0"
+      seed:
+        description: "Deterministic translation seed"
+        required: false
+        default: "42"
+
+jobs:
+  run-demo:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Set RUN_ID
+        run: |
+          RUN_ID="$(date -u +%Y%m%d-%H%M%S)"
+          echo "RUN_ID=$RUN_ID" >> "$GITHUB_ENV"
+          echo "RUN_ID=$RUN_ID"
+
+      - name: Translate threats
+        run: |
+          python tools/mvp_translate.py --spec specs/mvp_threats.yaml --seed "${{ inputs.seed }}" --out cases_mvp.jsonl
+
+      - name: Execute trials
+        env:
+          RUN_ID: ${{ env.RUN_ID }}
+        run: |
+          python tools/mvp_run.py --cases cases_mvp.jsonl --provider "${{ inputs.provider }}" --model "${{ inputs.model }}" --temperature "${{ inputs.temperature }}" --trials "${{ inputs.trials }}" --run-dir "results/${RUN_ID}"
+
+      - name: Verify outputs
+        env:
+          RUN_ID: ${{ env.RUN_ID }}
+        run: |
+          python tools/mvp_verify.py --rows "results/${RUN_ID}/rows.jsonl" --spec specs/mvp_threats.yaml --out "results/${RUN_ID}/summary.csv"
+
+      - name: Build minimal report
+        env:
+          RUN_ID: ${{ env.RUN_ID }}
+        run: |
+          python tools/mvp_report_min.py --rows "results/${RUN_ID}/rows.jsonl" --summary "results/${RUN_ID}/summary.csv" --out "results/${RUN_ID}/index.html"
+
+      - name: Upload artifacts
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: demo-mvp-${{ env.RUN_ID }}
+          path: results/${{ env.RUN_ID }}/
+          if-no-files-found: error
+          retention-days: 7
