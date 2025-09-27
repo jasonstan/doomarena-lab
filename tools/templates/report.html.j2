@@ -1,10 +1,11 @@
 <section id="trial-io">
   <h2>Trial I/O</h2>
+  $warning_html
   <p class="muted">$status_line</p>
   <table class="io-table">
     <thead>
       <tr>
-        <th>trial_id</th><th>callable</th><th>pre_gate</th><th>post_gate</th><th>success</th><th>input</th><th>output</th>
+        <th>trial_id</th><th>attack_id</th><th>success</th><th>input</th><th>output</th>
       </tr>
     </thead>
     <tbody>
@@ -30,8 +31,11 @@ document.addEventListener('click', function(e){
 .io-table{width:100%; border-collapse:collapse}
 .io-table th,.io-table td{border:1px solid #ddd; padding:8px; vertical-align:top}
 .muted{opacity:.75; font-size:.9em}
+.warning-banner{background:#fff4ce;border:1px solid #f0b429;padding:.5rem 1rem;border-radius:.5rem;margin-bottom:1rem;font-size:.95em}
+.warning-banner strong{font-weight:600}
 .preview,.fulltext{white-space:pre-wrap}
 .fulltext{display:none; margin-top:.5rem}
 .toggle{cursor:pointer; border:none; background:#eee; padding:.25rem .5rem; border-radius:.25rem}
 .expander{display:flex; flex-direction:column; gap:.5rem}
+.expander.placeholder .preview{font-style:italic;color:#666}
 </style>

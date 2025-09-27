@@ -8,6 +8,11 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
 
+try:  # pragma: no cover - script may run via tools/
+    from tools.constants import EMPTY_PLACEHOLDER
+except ModuleNotFoundError:  # pragma: no cover - fallback when invoked from tools/
+    from constants import EMPTY_PLACEHOLDER  # type: ignore
+
 CaseLike = Mapping[str, Any]
 
 
@@ -137,6 +142,14 @@ def _derive_base_row(case: CaseLike, override: Mapping[str, Any] | None = None) 
     return row
 
 
+def _coerce_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    return str(value)
+
+
 def persist_attempt(
     case: CaseLike,
     *,
@@ -161,7 +174,8 @@ def persist_attempt(
     if not attack_prompt:
         attack_prompt = case.get("prompt")
 
-    input_text = prompt_builder(case) or ""
+    raw_input_text = prompt_builder(case)
+    input_text = _coerce_text(raw_input_text)
 
     per_attempt_model_args = None
     candidate_args = case.get("model_args")
@@ -173,7 +187,8 @@ def persist_attempt(
     response = call_model(input_text, **args)
     latency_ms = int((time.time() - start) * 1000)
 
-    output_text = response_parser(response) or ""
+    parsed_output = response_parser(response)
+    output_text = _coerce_text(parsed_output)
 
     eval_result: Mapping[str, Any] | None = None
     if evaluator is not None:
@@ -191,12 +206,15 @@ def persist_attempt(
         success_value = base_row.get("success")
     base_row["success"] = bool(success_value) if success_value is not None else False
 
+    persisted_input = input_text if input_text else EMPTY_PLACEHOLDER
+    persisted_output = output_text if output_text else EMPTY_PLACEHOLDER
+
     base_row.update(
         {
             "attack_id": case.get("attack_id", "—"),
             "attack_prompt": attack_prompt or "—",
-            "input_text": input_text,
-            "output_text": output_text,
+            "input_text": persisted_input,
+            "output_text": persisted_output,
             "latency_ms": latency_ms,
         }
     )

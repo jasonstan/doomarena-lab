@@ -12,6 +12,8 @@ sys.path.insert(0, str(tools_dir))
 sys.modules[spec.name] = run_real
 spec.loader.exec_module(run_real)
 
+from constants import EMPTY_PLACEHOLDER
+
 
 def test_rows_capture_literal_io(tmp_path):
     run_dir = tmp_path / "run"
@@ -68,3 +70,31 @@ def test_rows_capture_literal_io(tmp_path):
 
     assert prompts_seen[0] == "Attack 0 Trial 0\nPrompt line 0"
     assert outputs_seen[0].startswith("output::0-0::")
+
+
+def test_rows_persist_empty_literals(tmp_path):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    rows_path = run_dir / "rows.jsonl"
+
+    def fake_call_model(prompt: str, **kwargs):
+        assert prompt == ""
+        return ""
+
+    case = {
+        "attack_id": "empty",
+        "trial_id": "empty-0",
+        "prompt": "",
+        "row": {"callable": True},
+    }
+
+    run_real.persist_attempt(
+        case,
+        rows_path=rows_path,
+        call_model=fake_call_model,
+        model_args=None,
+    )
+
+    payload = json.loads(rows_path.read_text(encoding="utf-8").strip())
+    assert payload["input_text"] == EMPTY_PLACEHOLDER
+    assert payload["output_text"] == EMPTY_PLACEHOLDER

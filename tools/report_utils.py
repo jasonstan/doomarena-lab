@@ -3,7 +3,24 @@ from __future__ import annotations
 
 from html import escape
 from collections.abc import Iterable, Mapping, Sequence
-from typing import Any
+from typing import Any, Iterable as TypingIterable
+
+try:  # pragma: no cover - script invoked from tools/
+    from tools.constants import (
+        EMPTY_PLACEHOLDER,
+        MISSING_INPUT_PLACEHOLDER,
+        MISSING_OUTPUT_PLACEHOLDER,
+        PLACEHOLDER_INPUT_VALUES,
+        PLACEHOLDER_OUTPUT_VALUES,
+    )
+except ModuleNotFoundError:  # pragma: no cover - fallback when executed from tools/
+    from constants import (  # type: ignore
+        EMPTY_PLACEHOLDER,
+        MISSING_INPUT_PLACEHOLDER,
+        MISSING_OUTPUT_PLACEHOLDER,
+        PLACEHOLDER_INPUT_VALUES,
+        PLACEHOLDER_OUTPUT_VALUES,
+    )
 
 
 KEY_CANDIDATES_PROMPT = [
@@ -168,19 +185,61 @@ def truncate_for_preview(text: str, limit: int = 240) -> str:
     return clean[:limit].rstrip() + "…"
 
 
-def expandable_block(block_id: str, full_text: str, limit: int = 240) -> str:
+def expandable_block(
+    block_id: str,
+    full_text: str,
+    limit: int = 240,
+    *,
+    classes: TypingIterable[str] | None = None,
+) -> str:
     full = full_text or ""
     preview = truncate_for_preview(full, limit=limit)
     safe_id = escape(str(block_id), quote=True)
     preview_html = escape(preview, quote=False)
     full_html = escape(full, quote=False)
+    class_tokens = ["expander"]
+    if classes:
+        class_tokens.extend(str(token) for token in classes if token)
+    class_attr = " ".join(dict.fromkeys(class_tokens))
     return (
-        '<div class="expander">'
+        f'<div class="{class_attr}">'
         f'<div class="preview">{preview_html}</div>'
         f'<button type="button" class="toggle" data-expands="{safe_id}">Expand</button>'
         f'<div class="fulltext" id="{safe_id}">{full_html}</div>'
         "</div>"
     )
+
+
+def normalize_literal(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    return str(value)
+
+
+def coalesce_literal(
+    primary: Any,
+    fallback: str,
+    *,
+    missing_placeholder: str,
+    placeholder_values: TypingIterable[str] | None = None,
+) -> tuple[str, bool]:
+    text = normalize_literal(primary)
+    if text:
+        if placeholder_values is None:
+            if missing_placeholder == MISSING_INPUT_PLACEHOLDER:
+                placeholder_set = set(PLACEHOLDER_INPUT_VALUES)
+            elif missing_placeholder == MISSING_OUTPUT_PLACEHOLDER:
+                placeholder_set = set(PLACEHOLDER_OUTPUT_VALUES)
+            else:
+                placeholder_set = {EMPTY_PLACEHOLDER}
+        else:
+            placeholder_set = set(placeholder_values)
+        return text, text in placeholder_set
+    if fallback:
+        return fallback, False
+    return missing_placeholder, True
 
 
 def safe_get(mapping: Mapping[str, Any] | None, key: str, default: str = "—") -> str:

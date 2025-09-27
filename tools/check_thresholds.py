@@ -12,6 +12,22 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
+try:
+    from tools.constants import (
+        PLACEHOLDER_INPUT_VALUES,
+        PLACEHOLDER_OUTPUT_VALUES,
+    )
+except ModuleNotFoundError:  # pragma: no cover
+    from constants import (  # type: ignore
+        PLACEHOLDER_INPUT_VALUES,
+        PLACEHOLDER_OUTPUT_VALUES,
+    )
+
+try:
+    from tools.report_utils import normalize_literal
+except ModuleNotFoundError:  # pragma: no cover
+    from report_utils import normalize_literal  # type: ignore
+
 import yaml
 
 REPORT_JSON_NAME = "run_report.json"
@@ -258,6 +274,48 @@ def load_metrics(run_dir: Path) -> Metrics:
         return _metrics_from_report(report)
     summary_path = run_dir / "summary.csv"
     return _metrics_from_summary(summary_path)
+
+
+def _warn_missing_trial_io(run_dir: Path) -> None:
+    rows_path = run_dir / "rows.jsonl"
+    if not rows_path.exists():
+        return
+
+    callable_rows = 0
+    missing_rows = 0
+
+    try:
+        with rows_path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    payload = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if payload.get("callable") is not True:
+                    continue
+                callable_rows += 1
+                input_text = normalize_literal(payload.get("input_text"))
+                output_text = normalize_literal(payload.get("output_text"))
+                input_missing = not input_text or input_text in PLACEHOLDER_INPUT_VALUES
+                output_missing = not output_text or output_text in PLACEHOLDER_OUTPUT_VALUES
+                if input_missing or output_missing:
+                    missing_rows += 1
+    except OSError:
+        return
+
+    if callable_rows <= 0 or missing_rows <= 0:
+        return
+
+    ratio = missing_rows / float(callable_rows)
+    if missing_rows >= 5 and ratio >= 0.6:
+        print(
+            "WARNING: missing literal trial I/O for "
+            f"{missing_rows}/{callable_rows} callable rows in {rows_path} — "
+            "check runner input_text/output_text persistence."
+        )
 
 
 def evaluate_thresholds(
@@ -591,6 +649,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     thresholds = load_thresholds(thresholds_path)
 
     metrics = load_metrics(run_dir)
+    _warn_missing_trial_io(run_dir)
     outcome = evaluate_thresholds(metrics, thresholds, strict_override=args.strict)
     summary_line = build_summary_line(outcome, metrics)
     detail_lines = build_detail_block(outcome, run_dir, run_id)
