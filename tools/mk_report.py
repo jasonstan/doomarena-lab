@@ -4,8 +4,6 @@ import argparse
 import json
 import os
 import sys
-from collections import OrderedDict, deque
-from collections.abc import Iterable, Sequence
 from pathlib import Path
 from string import Template
 from typing import Any, Dict, Iterator, Mapping, Optional, Tuple
@@ -31,9 +29,14 @@ except Exception:  # fallback for older runners
         return html.escape(str(s), quote=True)
 
 try:
-    from tools.report_utils import expandable_block, safe_get, truncate_for_preview
+    from tools.report_utils import (
+        expandable_block,
+        get_prompt,
+        get_response,
+        safe_get,
+    )
 except ModuleNotFoundError:  # pragma: no cover - script invoked from tools/
-    from report_utils import expandable_block, safe_get, truncate_for_preview
+    from report_utils import expandable_block, get_prompt, get_response, safe_get
 
 
 def _read_jsonl_lines(p: Path) -> Iterator[Dict[str, Any]]:
@@ -103,140 +106,6 @@ def _render_summary_table(snapshot: SummarySnapshot) -> str:
     return "".join(rows)
 
 
-def _join_user_messages(messages: Any) -> Optional[str]:
-    if not isinstance(messages, Iterable) or isinstance(messages, (str, bytes, bytearray)):
-        return None
-    parts = []
-    for message in messages:
-        if not isinstance(message, Mapping):
-            continue
-        role = message.get("role")
-        if role and str(role).lower() not in {"user", "system"}:
-            continue
-        text = _stringify_text(message.get("content"))
-        if not text:
-            text = _stringify_text(message.get("text"))
-        if text.strip():
-            parts.append(text)
-    if parts:
-        return "\n\n".join(parts)
-    return None
-
-
-def _stringify_text(value: Any) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, str):
-        return value
-    if isinstance(value, (int, float)):
-        return str(value)
-    if isinstance(value, Mapping):
-        for key in ("text", "content", "message"):
-            if key in value:
-                return _stringify_text(value.get(key))
-        return json.dumps(value, ensure_ascii=False)
-    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
-        parts = []
-        for item in value:
-            if isinstance(item, Mapping) and item.get("type") == "text":
-                text = _stringify_text(item.get("text"))
-            else:
-                text = _stringify_text(item)
-            if text:
-                parts.append(text)
-        if parts:
-            return "\n".join(parts)
-        return ""
-    return str(value)
-
-
-def _dig(mapping: Mapping[str, Any], path: Sequence[str]) -> Any:
-    current: Any = mapping
-    for key in path:
-        if not isinstance(current, Mapping):
-            return None
-        current = current.get(key)
-    return current
-
-
-def _openai_like(raw: Any) -> Optional[str]:
-    try:
-        return raw["choices"][0]["message"]["content"]
-    except Exception:
-        try:
-            return raw["choices"][0]["text"]
-        except Exception:
-            return None
-
-
-def _extract_prompt(row: Dict[str, Any]) -> Optional[str]:
-    candidate_paths = (
-        ("input_text",),
-        ("input", "input_text"),
-        ("input", "attack_prompt"),
-        ("input", "prompt"),
-        ("input_case", "attack_prompt"),
-        ("input_case", "prompt"),
-        ("request", "input", "attack_prompt"),
-        ("request", "input", "prompt"),
-        ("request", "attack_prompt"),
-        ("request", "prompt"),
-        ("attack_prompt",),
-        ("prompt",),
-        ("input",),
-    )
-    for path in candidate_paths:
-        value = _dig(row, path)
-        text = _stringify_text(value)
-        if text.strip():
-            return text
-
-    for path in (
-        ("messages",),
-        ("input", "messages"),
-        ("input_case", "messages"),
-        ("request", "messages"),
-        ("request", "input", "messages"),
-    ):
-        text = _join_user_messages(_dig(row, path))
-        if text:
-            return text
-
-    return None
-
-
-def _extract_response(row: Dict[str, Any]) -> Optional[str]:
-    candidate_paths = (
-        ("output_text",),
-        ("output", "text"),
-        ("output", "content"),
-        ("output", "message", "content"),
-        ("output", "choices"),
-        ("response", "text"),
-        ("response", "output_text"),
-        ("response", "content"),
-        ("response", "message", "content"),
-        ("response", "choices"),
-        ("completion", "text"),
-        ("completion", "choices"),
-        ("completion",),
-        ("output",),
-        ("response",),
-        ("model_output",),
-    )
-    for path in candidate_paths:
-        value = _dig(row, path)
-        text = _stringify_text(value)
-        if text.strip():
-            return text
-
-    raw = row.get("raw_output")
-    txt = _openai_like(raw)
-    if isinstance(txt, str) and txt.strip():
-        return txt
-    return None
-
-
 def _read_model_seed(run_dir: Path) -> Tuple[Optional[str], Optional[str]]:
     run_json = run_dir / "run.json"
     model = seed = None
@@ -268,7 +137,22 @@ def _find_rows_file(run_dir: Path) -> Optional[Path]:
     return None
 
 
-DEFAULT_TRIAL_LIMIT = 20
+def _resolve_table_cap() -> int:
+    for name in ("REPORT_MAX_TRIAL_ROWS", "TRIAL_TABLE_LIMIT"):
+        candidate = os.getenv(name)
+        if candidate is None:
+            continue
+        try:
+            value = int(candidate)
+        except ValueError:
+            continue
+        if value > 0:
+            return value
+    return 1000
+
+
+MAX_TABLE_ROWS = _resolve_table_cap()
+DEFAULT_TRIAL_LIMIT = MAX_TABLE_ROWS
 
 
 def _load_trial_template() -> Template:
@@ -325,139 +209,82 @@ def _format_gate(value: Any) -> str:
     return "—"
 
 
-def _trial_key(row: Mapping[str, Any], fallback: int) -> Tuple[str, bool]:
-    candidates = (
-        "trial_id",
-        "trial",
-        "trial_index",
-        "case_index",
-    )
-    for key in candidates:
-        value = row.get(key)
-        if value not in (None, ""):
-            return str(value), True
-    input_case = row.get("input_case")
-    if isinstance(input_case, Mapping):
-        for key in ("trial_id", "trial_index", "id", "prompt_id"):
-            value = input_case.get(key)
-            if value not in (None, ""):
-                return str(value), True
-    return f"row-{fallback}", False
-
-
-def _stream_callable_trials(rows_path: Path, limit: int) -> Tuple[list[Mapping[str, Any]], int, int]:
-    buckets: "OrderedDict[str, deque[Mapping[str, Any]]]" = OrderedDict()
-    key_order: list[str] = []
-    selected: list[Mapping[str, Any]] = []
-    total_callable = 0
-    trial_keys_seen: set[str] = set()
-    cycle_index = 0
-
-    for idx, row in enumerate(_read_jsonl_lines(rows_path)):
-        trial_key, is_concrete = _trial_key(row, idx)
-        if is_concrete:
-            trial_keys_seen.add(trial_key)
-
-        if row.get("callable") is True:
-            total_callable += 1
-            if len(selected) >= limit:
-                continue
-
-            if trial_key not in buckets:
-                buckets[trial_key] = deque()
-                key_order.append(trial_key)
-
-            buckets[trial_key].append(row)
-            cycle_index = _round_robin_drain(buckets, key_order, selected, limit, cycle_index)
-
-            if len(selected) >= limit:
-                buckets.clear()
-                key_order.clear()
-
-    return selected, total_callable, len(trial_keys_seen)
-
-
-def _round_robin_drain(
-    buckets: "OrderedDict[str, deque[Mapping[str, Any]]]",
-    key_order: list[str],
-    selected: list[Mapping[str, Any]],
-    limit: int,
-    cycle_index: int,
-) -> int:
-    if not key_order:
-        return cycle_index
-
-    made_progress = True
-    total_keys = len(key_order)
-    while len(selected) < limit and made_progress:
-        made_progress = False
-        for _ in range(total_keys):
-            if not key_order:
-                return cycle_index
-            key = key_order[cycle_index % len(key_order)]
-            cycle_index += 1
-            queue = buckets.get(key)
-            if queue:
-                selected.append(queue.popleft())
-                made_progress = True
-                if len(selected) >= limit:
-                    break
-        if not made_progress:
-            break
-    return cycle_index
-
-
 def _resolve_trial_id(row: Mapping[str, Any], fallback_index: int) -> str:
-    for key in ("trial_id", "trial", "trial_index", "id"):
+    for key in ("trial_id", "id", "trial", "trial_index"):
         value = row.get(key)
         if value not in (None, ""):
             return str(value)
     input_case = row.get("input_case")
     if isinstance(input_case, Mapping):
-        for key in ("trial_id", "trial_index", "id"):
+        for key in ("trial_id", "id", "trial", "trial_index", "prompt_id"):
             value = input_case.get(key)
             if value not in (None, ""):
                 return str(value)
-    return str(fallback_index + 1)
+    return str(fallback_index)
 
 
-def _render_trial_rows(rows: list[Mapping[str, Any]]) -> Tuple[str, int]:
-    rendered_rows: list[str] = []
-    for idx, row in enumerate(rows):
-        trial_id = esc(_resolve_trial_id(row, idx))
-        callable_text = esc(_format_callable(row.get("callable")))
-        pre_gate = esc(_format_gate(row.get("pre_gate")))
-        post_gate = esc(_format_gate(row.get("post_gate")))
-        success = _format_success(row.get("success"))
+def _build_trial_row(row: Mapping[str, Any], index: int) -> Dict[str, str]:
+    trial_id_raw = _resolve_trial_id(row, index)
+    prompt_txt = get_prompt(row) or ""
+    response_txt = get_response(row) or ""
 
-        prompt_full = _extract_prompt(row) or ""
-        response_full = _extract_response(row) or ""
-        prompt_preview = truncate_for_preview(prompt_full)
-        response_preview = truncate_for_preview(response_full)
+    prompt_html = expandable_block(f"p-{trial_id_raw}", prompt_txt)
+    response_html = expandable_block(f"r-{trial_id_raw}", response_txt)
 
-        prompt_html = expandable_block(
-            f"prompt-{idx}",
-            prompt_preview,
-            prompt_full,
-        )
-        response_html = expandable_block(
-            f"response-{idx}",
-            response_preview,
-            response_full,
-        )
+    success_value = row.get("success")
+    if success_value in (None, ""):
+        success_value = row.get("judge_success")
 
-        rendered_rows.append(
+    return {
+        "trial_id": esc(trial_id_raw),
+        "callable": esc(_format_callable(row.get("callable"))),
+        "pre_gate": esc(_format_gate(row.get("pre_gate", "—"))),
+        "post_gate": esc(_format_gate(row.get("post_gate", "—"))),
+        "success": _format_success(success_value),
+        "prompt_html": prompt_html,
+        "response_html": response_html,
+    }
+
+
+def _collect_trial_rows(rows_path: Path, max_rows: int) -> Tuple[list[Dict[str, str]], int]:
+    table_rows: list[Dict[str, str]] = []
+    total_callable = 0
+
+    for idx, row in enumerate(_read_jsonl_lines(rows_path)):
+        if row.get("callable") is True:
+            total_callable += 1
+            if len(table_rows) >= max_rows:
+                continue
+            table_rows.append(_build_trial_row(row, idx))
+
+    return table_rows, total_callable
+
+
+def _render_trial_table_rows(rows: list[Dict[str, str]]) -> str:
+    rendered: list[str] = []
+    for row in rows:
+        rendered.append(
             "<tr>"
-            f"<td>{trial_id}</td>"
-            f"<td>{callable_text}</td>"
-            f"<td>{pre_gate}</td>"
-            f"<td>{post_gate}</td>"
-            f"<td>{success}</td>"
-            f"<td>{prompt_html}</td>"
-            f"<td>{response_html}</td>"
+            f"<td>{row['trial_id']}</td>"
+            f"<td>{row['callable']}</td>"
+            f"<td>{row['pre_gate']}</td>"
+            f"<td>{row['post_gate']}</td>"
+            f"<td>{row['success']}</td>"
+            f"<td>{row['prompt_html']}</td>"
+            f"<td>{row['response_html']}</td>"
             "</tr>"
         )
-    return "\n".join(rendered_rows), len(rows)
+    return "\n".join(rendered)
+
+
+def _load_run_meta(run_dir: Path) -> Dict[str, Any]:
+    run_json = run_dir / "run.json"
+    if not run_json.exists():
+        return {}
+    try:
+        return json.loads(run_json.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
 
 
 def render_trial_io_section(run_dir: Path, *, trial_limit: int) -> str:
@@ -477,9 +304,26 @@ def render_trial_io_section(run_dir: Path, *, trial_limit: int) -> str:
             total_trials=0,
         )
 
-    sampled_rows, total_callable, total_trials = _stream_callable_trials(rows_path, trial_limit)
-    rows_html, shown_n = _render_trial_rows(sampled_rows)
-    display_trials = total_trials or max(total_callable, shown_n, 0)
+    run_meta = _load_run_meta(run_dir)
+    total_trials_meta: Any = run_meta.get("trials")
+    if total_trials_meta is None:
+        total_trials_meta = run_meta.get("total_trials")
+    try:
+        total_trials = int(total_trials_meta)
+    except (TypeError, ValueError):
+        total_trials = "—"
+
+    cap = trial_limit if trial_limit > 0 else MAX_TABLE_ROWS
+    cap = min(cap, MAX_TABLE_ROWS)
+
+    table_rows, total_callable = _collect_trial_rows(rows_path, cap)
+    shown_n = len(table_rows)
+    rows_html = _render_trial_table_rows(table_rows)
+
+    if total_trials == "—":
+        trials_display = "—"
+    else:
+        trials_display = str(total_trials)
 
     if total_callable == 0:
         banner = "<p class=\"muted\">No callable trials—check pre/post gates or budgets.</p>"
@@ -487,7 +331,7 @@ def render_trial_io_section(run_dir: Path, *, trial_limit: int) -> str:
     else:
         banner = (
             "<p class=\"muted\">showing "
-            f"{shown_n} of {total_callable} callable trials; round-robin across {display_trials} trials."  # noqa: E501
+            f"{shown_n} of {total_callable} callable trials; round-robin across {trials_display} trials."  # noqa: E501
             "</p>"
         )
         table_html = (
@@ -504,13 +348,20 @@ def render_trial_io_section(run_dir: Path, *, trial_limit: int) -> str:
             "</table>"
         )
 
+    context = {
+        "trial_table": table_rows,
+        "shown_n": shown_n,
+        "total_callable": total_callable,
+        "total_trials": trials_display,
+    }
+
     return template.substitute(
         banner=_escape_for_template(banner),
         table_html=_escape_for_template(table_html),
         rel_root=rel_root,
         shown_n=shown_n,
         total_callable=total_callable,
-        total_trials=display_trials,
+        total_trials=trials_display,
     )
 
 
@@ -648,20 +499,28 @@ def main(run_dir_arg: str, *, trial_limit: int) -> int:
 
 def _cli(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description="Render DoomArena reports")
-    env_limit = os.environ.get("TRIAL_TABLE_LIMIT")
-    try:
-        default_limit = int(env_limit) if env_limit is not None else DEFAULT_TRIAL_LIMIT
-    except ValueError:
-        default_limit = DEFAULT_TRIAL_LIMIT
+    env_limit = os.environ.get("TRIAL_TABLE_LIMIT") or os.environ.get("REPORT_MAX_TRIAL_ROWS")
+    default_limit = DEFAULT_TRIAL_LIMIT
+    if env_limit is not None:
+        try:
+            parsed = int(env_limit)
+        except ValueError:
+            parsed = DEFAULT_TRIAL_LIMIT
+        if parsed > 0:
+            default_limit = min(parsed, MAX_TABLE_ROWS)
     parser.add_argument("run_dir", help="Run directory containing summary artifacts")
     parser.add_argument(
         "--trial-limit",
         type=int,
         default=default_limit,
-        help=f"Number of callable trials to sample for the I/O table (default: {default_limit})",
+        help=(
+            "Maximum number of callable trials to include in the I/O table "
+            f"(default: {default_limit})"
+        ),
     )
     args = parser.parse_args(argv[1:])
-    limit = args.trial_limit if args.trial_limit > 0 else DEFAULT_TRIAL_LIMIT
+    limit = args.trial_limit if args.trial_limit and args.trial_limit > 0 else DEFAULT_TRIAL_LIMIT
+    limit = min(limit, MAX_TABLE_ROWS)
     return main(args.run_dir, trial_limit=limit)
 
 
