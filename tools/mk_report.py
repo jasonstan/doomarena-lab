@@ -11,6 +11,16 @@ from string import Template
 from typing import Any, Dict, Iterator, Mapping, Optional, Tuple
 
 try:
+    from tools.aggregate import SummarySnapshot, stream_summary
+except ModuleNotFoundError:  # pragma: no cover - script invoked from tools/
+    from aggregate import SummarySnapshot, stream_summary  # type: ignore
+
+try:
+    from tools.svg_chart import render_compact_asr_chart
+except ModuleNotFoundError:  # pragma: no cover - script invoked from tools/
+    from svg_chart import render_compact_asr_chart  # type: ignore
+
+try:
     from tools.report.html_utils import esc
 except Exception:  # fallback for older runners
     import html
@@ -36,6 +46,61 @@ def _read_jsonl_lines(p: Path) -> Iterator[Dict[str, Any]]:
                 yield json.loads(line)
             except Exception:
                 continue
+
+
+def _format_percent(value: float) -> str:
+    return f"{value * 100:.1f}%"
+
+
+def _render_summary_overview(snapshot: SummarySnapshot) -> str:
+    totals = snapshot.totals
+    pieces = [
+        "<ul class=\"summary-overview\">",
+        f"<li><strong>Total trials:</strong> {totals.total}</li>",
+        f"<li><strong>Callable:</strong> {totals.callable_true} ({_format_percent(totals.callable_rate())})</li>",
+        f"<li><strong>Success:</strong> {totals.success_true} ({_format_percent(totals.pass_rate())})</li>",
+    ]
+    if snapshot.malformed_rows:
+        pieces.append(
+            f"<li><strong>Malformed rows skipped:</strong> {snapshot.malformed_rows}</li>"
+        )
+    pieces.append("</ul>")
+    return "".join(pieces)
+
+
+def _render_summary_table(snapshot: SummarySnapshot) -> str:
+    totals = snapshot.totals
+    rows: list[str] = [
+        "<table class=\"summary-table\">",
+        "<thead><tr><th>Slice</th><th>Persona</th><th>Trials</th><th>Callable</th><th>Success</th><th>Callable%</th><th>Pass%</th></tr></thead>",
+        "<tbody>",
+    ]
+    rows.append(
+        "<tr class=\"summary-total\">"
+        "<td><strong>Total</strong></td>"
+        "<td>—</td>"
+        f"<td>{totals.total}</td>"
+        f"<td>{totals.callable_true}</td>"
+        f"<td>{totals.success_true}</td>"
+        f"<td>{_format_percent(totals.callable_rate())}</td>"
+        f"<td>{_format_percent(totals.pass_rate())}</td>"
+        "</tr>"
+    )
+    for entry in snapshot.slice_persona:
+        counts = entry.counts
+        rows.append(
+            "<tr>"
+            f"<td>{esc(entry.slice_id)}</td>"
+            f"<td>{esc(entry.persona)}</td>"
+            f"<td>{counts.total}</td>"
+            f"<td>{counts.callable_true}</td>"
+            f"<td>{counts.success_true}</td>"
+            f"<td>{_format_percent(counts.callable_rate())}</td>"
+            f"<td>{_format_percent(counts.pass_rate())}</td>"
+            "</tr>"
+        )
+    rows.append("</tbody></table>")
+    return "".join(rows)
 
 
 def _join_user_messages(messages: Any) -> Optional[str]:
@@ -476,8 +541,33 @@ def _read_file_safe(p: Path) -> str:
 
 def build_full_html(run_dir: Path, trial_limit: int) -> str:
     summary_svg = run_dir / "summary.svg"
+    rows_path = _find_rows_file(run_dir)
 
-    parts = []
+    snapshot: Optional[SummarySnapshot] = None
+    if rows_path and rows_path.exists():
+        try:
+            snapshot = stream_summary(rows_path)
+        except Exception:
+            snapshot = None
+
+    if snapshot and snapshot.has_trials():
+        overview_html = _render_summary_overview(snapshot)
+        chart_html = render_compact_asr_chart(snapshot.chart_bars())
+        table_html = _render_summary_table(snapshot)
+    else:
+        if snapshot and snapshot.malformed_rows:
+            overview_html = (
+                f"<p class=\"muted\">No trials recorded; skipped {snapshot.malformed_rows} malformed rows.</p>"
+            )
+        else:
+            overview_html = "<p class=\"muted\">No trials recorded.</p>"
+        if summary_svg.exists():
+            chart_html = _read_file_safe(summary_svg)
+        else:
+            chart_html = render_compact_asr_chart([])
+        table_html = "<p class=\"muted\">No summary data available.</p>"
+
+    parts: list[str] = []
     parts.append("<!doctype html><meta charset='utf-8'>")
     parts.append("<title>DoomArena-Lab Report</title>")
     parts.append(
@@ -487,18 +577,26 @@ def build_full_html(run_dir: Path, trial_limit: int) -> str:
     parts.append("<h1>DoomArena-Lab Report</h1>")
     parts.append(_append_badges(run_dir))
 
-    if summary_svg.exists():
-        parts.append("<h2>Pass/Fail overview</h2>")
-        parts.append(_read_file_safe(summary_svg))
+    parts.append("<section><h2>Overview</h2>")
+    parts.append(overview_html)
+    parts.append("</section>")
+
+    parts.append("<section><h2>Attack result (ASR)</h2>")
+    parts.append(chart_html)
+    parts.append("</section>")
+
+    parts.append("<section><h2>Summary table</h2>")
+    parts.append(table_html)
+    parts.append("</section>")
 
     parts.append(render_trial_io_section(run_dir, trial_limit=trial_limit))
 
-    parts.append("<h2>Artifacts</h2><ul>")
+    parts.append("<section><h2>Artifacts</h2><ul>")
     for name in ("summary.csv", "summary.svg", "rows.jsonl", "run.json"):
         p = run_dir / name
         if p.exists():
             parts.append(f"<li><a href='{esc(str(name))}'>{esc(name)}</a></li>")
-    parts.append("</ul>")
+    parts.append("</ul></section>")
 
     return "\n".join(parts)
 
