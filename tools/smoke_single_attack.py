@@ -10,13 +10,22 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from pathlib import Path
 from typing import Any, Mapping
 
+TOOLS_DIR = Path(__file__).resolve().parent
+ROOT_DIR = TOOLS_DIR.parent
+
+for path_dir in (TOOLS_DIR, ROOT_DIR):
+    str_path = str(path_dir)
+    if str_path not in sys.path:
+        sys.path.insert(0, str_path)
+
 try:
-    from tools.run_real import build_final_prompt, extract_text as response_parser
+    from run_real import build_final_prompt, extract_text as response_parser
 except Exception as exc:  # pragma: no cover - import error surfaced to caller
     print(
-        "ERROR: Cannot import required utilities from tools.run_real:"
+        "ERROR: Cannot import required utilities from run_real:",
         f" {type(exc).__name__}: {exc}",
         file=sys.stderr,
     )
