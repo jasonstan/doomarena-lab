@@ -8,6 +8,7 @@ import csv
 import html
 import json
 import pathlib
+from collections import defaultdict
 from typing import Any
 
 
@@ -52,6 +53,16 @@ def _format_percent(value: str | float | None) -> str:
         return "0%"
 
 
+def _parse_int(value: Any) -> int:
+    try:
+        return int(value)
+    except Exception:
+        try:
+            return int(float(value))
+        except Exception:
+            return 0
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate a minimal HTML report for MVP demo results")
     parser.add_argument("--rows", required=True, type=pathlib.Path)
@@ -73,7 +84,13 @@ def main() -> None:
         "<style>body{font-family:Arial,Helvetica,sans-serif;margin:20px;}table{border-collapse:collapse;width:100%;}"
         "th,td{border:1px solid #ddd;padding:8px;vertical-align:top;}th{background-color:#f4f4f4;}"
         "button{padding:4px 8px;}pre{white-space:pre-wrap;word-break:break-word;margin:8px 0;}"
-        ".success-true{color:#0a0;} .success-false{color:#a00;}</style>"
+        ".success-true{color:#0a0;} .success-false{color:#a00;}"
+        ".badge{display:inline-block;padding:2px 6px;margin-left:6px;font-size:12px;border-radius:4px;background-color:#eee;color:#555;}"
+        ".badge-rate_limit{background-color:#ffe8d5;color:#a55d00;}"
+        ".badge-http{background-color:#ffe5e5;color:#a00000;}"
+        ".badge-network{background-color:#e5f1ff;color:#0055aa;}"
+        ".stats{margin:12px 0;padding:10px;border:1px solid #ddd;border-radius:6px;background-color:#fafafa;}"
+        "</style>"
     )
     html_parts.append(
         "<script>function toggle(id){var el=document.getElementById(id);if(!el){return;}"
@@ -95,11 +112,48 @@ def main() -> None:
     if timestamp:
         html_parts.append(f"<p><strong>Timestamp:</strong> {timestamp}</p>")
 
-    overall_asr = _format_percent(overall.get("asr"))
-    html_parts.append(f"<p><strong>Overall ASR:</strong> {overall_asr}</p>")
+    attempts_total = _parse_int(overall.get("attempts_total"))
+    attempts_viable = _parse_int(overall.get("attempts_viable"))
+    successes_total = _parse_int(overall.get("successes"))
+    excluded_total = max(0, attempts_total - attempts_viable)
+    overall_asr = _format_percent(overall.get("asr_viable"))
+
+    excluded_counts: dict[str, int] = defaultdict(int)
+    for row in rows:
+        attempt_status = row.get("attempt_status", "ok")
+        count_in_asr = row.get("count_in_asr", True)
+        if attempt_status != "ok" or not count_in_asr:
+            error_kind = row.get("error_kind") or "other"
+            excluded_counts[str(error_kind)] += 1
+
+    breakdown_parts: list[str] = []
+    known_labels = {
+        "rate_limit": "rate-limit",
+        "http": "http",
+        "network": "network",
+    }
+    for key, label in known_labels.items():
+        count = excluded_counts.get(key, 0)
+        if count:
+            breakdown_parts.append(f"{label} {count}")
+    for key, count in excluded_counts.items():
+        if key in known_labels or not count:
+            continue
+        breakdown_parts.append(f"{key} {count}")
+    excluded_text = ", ".join(breakdown_parts) if breakdown_parts else "none"
 
     html_parts.append(
-        "<table><thead><tr><th>Attempt</th><th>Attack ID</th><th>Success</th><th>Input</th><th>Output</th></tr></thead><tbody>"
+        "<div class='stats'>"
+        f"<p><strong>Attempts:</strong> {attempts_viable} / {attempts_total}"
+        f" &nbsp; • &nbsp; <strong>Excluded:</strong> {excluded_total} ({excluded_text})" \
+        "</p>"
+        f"<p><strong>Successes:</strong> {successes_total}"
+        f" &nbsp; • &nbsp; <strong>ASR (viable):</strong> {overall_asr}</p>"
+        "</div>"
+    )
+
+    html_parts.append(
+        "<table><thead><tr><th>Attempt</th><th>Attack ID</th><th>Success</th><th>Input</th><th>Output</th><th>Verifier</th></tr></thead><tbody>"
     )
     for index, row in enumerate(rows):
         attempt = html.escape(str(row.get("trial_id", index)))
@@ -110,6 +164,8 @@ def main() -> None:
         input_content = html.escape(row.get("input_text", ""))
         output_content = html.escape(row.get("output_text", ""))
         error_text = html.escape(row.get("error", ""))
+        attempt_status = row.get("attempt_status", "ok")
+        count_in_asr = row.get("count_in_asr", True)
         input_id = f"input-{index}"
         output_id = f"output-{index}"
         input_cell = (
@@ -124,13 +180,35 @@ def main() -> None:
             f"<button type='button' onclick=\"toggle('{output_id}')\">Toggle</button>"
             f"<div id='{output_id}' style='display:none;'>{output_body}</div>"
         )
+        badge_html = ""
+        if attempt_status != "ok" or not count_in_asr:
+            badge_kind = str(row.get("error_kind") or "other")
+            badge_label_map = {
+                "rate_limit": "rate limit",
+                "http": "http",
+                "network": "network",
+            }
+            badge_label = badge_label_map.get(badge_kind, "other")
+            badge_class = f"badge badge-{html.escape(badge_kind)}"
+            badge_html = f"<span class='{badge_class}'>Excluded – {html.escape(badge_label)}</span>"
+
+        verifier_rule = html.escape(str(row.get("verifier_rule_id", "-")) or "-")
+        verifier_threshold = html.escape(str(row.get("verifier_threshold", "-")) or "-")
+        verifier_matched = "true" if row.get("verifier_matched") else "false"
+        verifier_pattern = html.escape(str(row.get("verifier_pattern", "")))
+        verifier_cell = (
+            f"rule={verifier_rule} • threshold={verifier_threshold} "
+            f"• matched={verifier_matched} • pattern=\"{verifier_pattern}\""
+        )
+
         html_parts.append(
             "<tr>"
-            f"<td>{attempt}</td>"
+            f"<td>{attempt}{badge_html}</td>"
             f"<td>{attack_id}</td>"
             f"<td class='{success_class}'>{success_label}</td>"
             f"<td>{input_cell}</td>"
             f"<td>{output_cell}</td>"
+            f"<td>{verifier_cell}</td>"
             "</tr>"
         )
     html_parts.append("</tbody></table>")

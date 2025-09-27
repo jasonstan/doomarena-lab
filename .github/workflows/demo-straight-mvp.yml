@@ -23,6 +23,26 @@ on:
         description: "If real key is missing, auto-switch to mock"
         type: boolean
         default: false
+      rpm:
+        description: "Requests per minute cap"
+        type: number
+        default: 30
+      sleep_ms:
+        description: "Extra sleep between attempts (ms)"
+        type: number
+        default: 0
+      max_retries:
+        description: "Max retries on 429/5xx"
+        type: number
+        default: 2
+      backoff_ms:
+        description: "Base backoff (ms)"
+        type: number
+        default: 750
+      respect_retry_after:
+        description: "Honor provider retry-after hints"
+        type: boolean
+        default: true
 
 jobs:
   mvp:
@@ -111,7 +131,12 @@ jobs:
             --run-dir "results/${RUN_ID}" \
             --groq-base "${GROQ_API_BASE}" \
             --openai-base "${OPENAI_API_BASE}" \
-            --allow-mock-fallback "${ALLOW_MOCK}"
+            --allow-mock-fallback "${ALLOW_MOCK}" \
+            --rpm "${{ inputs.rpm }}" \
+            --sleep-ms "${{ inputs.sleep_ms }}" \
+            --max-retries "${{ inputs.max_retries }}" \
+            --backoff-ms "${{ inputs.backoff_ms }}" \
+            --respect-retry-after "${{ inputs.respect_retry_after }}"
 
       - name: Verify results
         run: |
