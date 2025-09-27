@@ -154,9 +154,9 @@ def persist_attempt(
     rows_path: os.PathLike[str] | str,
     call_model: Callable[..., Any],
     model_args: Mapping[str, Any] | None = None,
-    prompt_builder: Callable[[CaseLike], str] = build_final_prompt,
-    response_parser: Callable[[Any], str] = extract_text,
-    evaluator: Callable[[CaseLike, str, str, Any], Mapping[str, Any]] | None = None,
+    prompt_builder: Callable[[CaseLike], Any] = build_final_prompt,
+    response_parser: Callable[[Any], Any] = extract_text,
+    evaluator: Callable[[CaseLike, Any, Any, Any], Mapping[str, Any]] | None = None,
     row_overrides: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Execute a single REAL attempt and persist the resulting row."""
@@ -172,7 +172,8 @@ def persist_attempt(
     if not attack_prompt:
         attack_prompt = case.get("prompt")
 
-    input_text_literal = _ensure_string(prompt_builder(case))
+    prompt_payload = prompt_builder(case)
+    input_text_literal = _ensure_string(prompt_payload)
 
     per_attempt_model_args = None
     candidate_args = case.get("model_args")
@@ -181,7 +182,7 @@ def persist_attempt(
     args = _combine_model_args(model_args, per_attempt_model_args)
 
     start = time.time()
-    response = call_model(input_text_literal, **args)
+    response = call_model(prompt_payload, **args)
     latency_ms = int((time.time() - start) * 1000)
 
     parsed_output = response_parser(response)
@@ -191,7 +192,7 @@ def persist_attempt(
     if evaluator is not None:
         try:
             eval_result = (
-                evaluator(case, input_text_literal, output_text_literal, response) or {}
+                evaluator(case, prompt_payload, parsed_output, response) or {}
             )
         except Exception:
             eval_result = {}
